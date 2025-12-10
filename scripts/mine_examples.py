@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Dict, Any
 
 
+# extract examples from .rst sphinx doc files
+
+
 # ---------- Data structures ----------
 
 
