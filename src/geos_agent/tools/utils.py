@@ -3,7 +3,8 @@ from typing import List
 
 from .base import Tool
 from .file_tools import ReadFileTool, WriteFileTool
-from .search_tools import RunGeosTool, SearchGeosDocsTool, SearchWebTool
+from .geos_tool import RunGeosTool
+from .search_tools import SearchGeosDocsTool, SearchWebTool
 from .shell_tools import ListDirTool, PythonExecTool, ShellCommandTool
 
 
