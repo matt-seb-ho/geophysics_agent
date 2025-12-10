@@ -32,6 +32,8 @@ WORKDIR /workspace
 #     git submodule update
 #     cd ..
 
+# NOTE: TPL dependencies from docker hub may be incomplete...
+
 
 
 CMD ["/bin/bash"]
