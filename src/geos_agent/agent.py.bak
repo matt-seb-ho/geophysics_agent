@@ -1,0 +1,34 @@
+# from openai import Client
+from llm_wrapper import LLMClient, GenerationConfig
+
+from geos_agent.constants import GPT5_MINI
+
+
+class GeosAgent:
+    """A simple AI agent that can answer questions"""
+
+    def __init__(
+        self,
+        client: LLMClient,
+        generation_config: GenerationConfig,
+        model: str = GPT5_MINI,
+    ):
+        self.client = client
+        self.gen_cfg = generation_config
+        self.model = model
+
+        # conversation history
+        self.messages = []
+
+    def chat(self, message: str, role: str = "user") -> str:
+        # first append user message to history
+        self.messages.append({"role": role, "content": message})
+        # generate response
+        output = self.client.generate(
+            prompt=self.messages,
+            model=self.model,
+            gen_cfg=self.gen_cfg,
+        )[0]
+        # append assistant response to history
+        self.messages.append({"role": "assistant", "content": output})
+        return output
