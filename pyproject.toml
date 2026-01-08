@@ -1,7 +1,17 @@
 [project]
 name = "geophysics_agent"
 version = "0.1.0"
-dependencies = []
+dependencies = [
+    "openai>=2.14.0",
+    "python-dotenv",
+]
+
+[project.scripts]
+geos-agent = "geos_agent.tools.tools:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.uv.workspace]
+members = [
+]

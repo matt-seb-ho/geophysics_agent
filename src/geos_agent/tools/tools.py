@@ -11,6 +11,9 @@ from geos_agent.tools.utils import build_default_tools
 
 def main():
     import argparse
+    from dotenv import load_dotenv
+
+    load_dotenv()  # Load environment variables from .env if present
 
     parser = argparse.ArgumentParser(
         description="GEOS-Agent: minimal file/code agent scaffold for GEOS workflows."
