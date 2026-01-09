@@ -39,7 +39,7 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-5.1-mini",
+        default="gpt-5.1-codex-mini",
         help="OpenAI model name.",
     )
     parser.add_argument(

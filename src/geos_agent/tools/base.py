@@ -21,14 +21,12 @@ class Tool:
     parameters: Dict[str, Any] = {}
 
     def get_spec(self) -> Dict[str, Any]:
-        """Return OpenAI 'tools' entry for this function."""
+        """Return OpenAI 'tools' entry for v1/responses API."""
         return {
             "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": self.parameters,
-            },
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.parameters,
         }
 
     def run(self, **kwargs) -> Any:

@@ -67,35 +67,62 @@ class GeosAgent:
     def _get_tool_specs(self) -> List[Dict[str, Any]]:
         return [t.get_spec() for t in self.tools]
 
-    def _call_model(self) -> Any:
-        """Call the OpenAI chat completion API with current messages."""
-        response = self.client.chat.completions.create(
-            model=self.config.model,
-            messages=self.messages,
-            tools=self._get_tool_specs(),
-            tool_choice="auto",
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-        )
+    def _call_model(
+        self,
+        input_item: Any,
+        previous_response_id: Optional[str] = None,
+        instructions: Optional[str] = None,
+    ) -> Any:
+        """Call the OpenAI responses API."""
+        kwargs = {
+            "model": self.config.model,
+            "input": input_item,
+            "tools": self._get_tool_specs(),
+        }
+        if previous_response_id:
+            kwargs["previous_response_id"] = previous_response_id
+        if instructions:
+            kwargs["instructions"] = instructions
+
+        # v1/responses parameters (checking compatibility)
+        if hasattr(self.config, "temperature"):
+             pass
+        
+        # **api call**
+        response = self.client.responses.create(**kwargs)
         return response
 
-    def _run_tool_call(self, tool_call) -> str:
-        """Execute a single tool call and return a JSON-serializable result string."""
+    def _run_tool_call(self, tool_call) -> Dict[str, Any]:
+        """Execute a tool call and return a result item for v1/responses."""
         name = tool_call.function.name
         args_str = tool_call.function.arguments or "{}"
 
         try:
             args = json.loads(args_str)
         except json.JSONDecodeError as e:
-            result = {"error": f"Failed to parse tool arguments: {e}", "raw": args_str}
+            result_str = json.dumps(
+                {"error": f"Failed to parse tool arguments: {e}", "raw": args_str},
+                ensure_ascii=False,
+            )
             self._log("tool_args_parse_error", tool=name, error=str(e), raw=args_str)
-            return json.dumps(result, ensure_ascii=False)
+            # Return a tool output item
+            return {
+                "type": "function_call", 
+                "call_id": tool_call.call_id, 
+                "output": result_str
+            }
 
         tool = self.tool_map.get(name)
         if tool is None:
-            result = {"error": f"Unknown tool: {name}", "args": args}
+            result_str = json.dumps(
+                {"error": f"Unknown tool: {name}", "args": args}, ensure_ascii=False
+            )
             self._log("tool_unknown", tool=name, args=args)
-            return json.dumps(result, ensure_ascii=False)
+            return {
+                "call_id": tool_call.call_id,
+                "type": "function_call",
+                "output": result_str
+            }
 
         try:
             output_obj = tool.run(**args)
@@ -109,84 +136,85 @@ class GeosAgent:
                 args=args,
                 result_preview=result_str[:500],
             )
-            return result_str
+            return {
+                "call_id": tool_call.call_id,
+                "type": "function_call",
+                "output": result_str
+            }
         except Exception as e:
-            result = {"error": f"Tool {name} raised an exception: {e!r}", "args": args}
+            result_str = json.dumps(
+                {"error": f"Tool {name} raised an exception: {e!r}", "args": args},
+                ensure_ascii=False,
+            )
             self._log("tool_run_exception", tool=name, args=args, error=str(e))
-            return json.dumps(result, ensure_ascii=False)
+            return {
+                "call_id": tool_call.call_id,
+                "type": "function_call",
+                "output": result_str
+            }
 
     # ------------- public API -------------
 
     def run(self, user_input: str) -> str:
         """
-        Run a full agent loop for a single high-level user instruction.
-
-        Returns the final assistant message content (string).
+        Run a full agent loop utilizing the v1/responses API.
         """
-
-        # Reset short-term memory for each top-level run.
-        self.messages = [
-            {"role": "system", "content": self.system_prompt},
-        ]
-        self.messages.append({"role": "user", "content": user_input})
         self._log("user_input", content=user_input)
 
+        # Initial request
+        # For v1/responses, we send the user input and instructions.
+        current_response = self._call_model(
+            input_item=user_input,
+            instructions=self.system_prompt,
+        )
+
         for step in range(1, self.config.max_steps + 1):
-            self._log("step_start", step=step)
+            self._log("step_start", step=step, response_id=current_response.id)            
+            assistant_text = ""
+            tool_calls = []
 
-            response = self._call_model()
-            msg = response.choices[0].message
-
-            assistant_msg: Dict[str, Any] = {
-                "role": "assistant",
-                "content": msg.content or "",
-            }
-
-            # Attach tool_calls if present so the model sees them in history.
-            if msg.tool_calls:
-                assistant_msg["tool_calls"] = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in msg.tool_calls
-                ]
-
-            self.messages.append(assistant_msg)
+            for item in current_response.output:
+                if item.type == "message":
+                    # content is a list of content blocks
+                    if item.content:
+                        for block in item.content:
+                            if hasattr(block, 'text'):
+                                assistant_text += block.text
+                elif item.type == "function_call":
+                    tool_calls.append(item)
 
             self._log(
                 "model_reply",
                 step=step,
-                content_preview=(msg.content or "")[:200],
-                tools_requested=[tc.function.name for tc in (msg.tool_calls or [])],
+                content_preview=assistant_text[:200],
+                tools_requested=[tc.function.name for tc in tool_calls],
             )
 
-            # If there are no tool calls, we treat this as the final answer.
-            if not msg.tool_calls:
-                final_text = msg.content or ""
+            if not tool_calls:
+                # No tools to run, we are done.
                 self._log("run_complete", step=step, outcome="no_tool_calls")
-                return final_text
+                return assistant_text
 
-            # Otherwise, run each tool and feed back results.
-            for tc in msg.tool_calls:
-                result_str = self._run_tool_call(tc)
+            # Execute tools
+            tool_outputs = []
+            for tc in tool_calls:
+                output_item = self._run_tool_call(tc)
+                tool_outputs.append(output_item)
 
-                self.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result_str,
-                    }
-                )
+            # Feed back to model
+            current_response = self._call_model(
+                input_item=tool_outputs,
+                previous_response_id=current_response.id
+            )
 
-        # If we hit max_steps without a natural stopping point, return last content.
         self._log("max_steps_reached", max_steps=self.config.max_steps)
-        last_assistant = next(
-            (m for m in reversed(self.messages) if m["role"] == "assistant"),
-            None,
-        )
-        return (last_assistant or {}).get("content", "")
+        # Try to extract text from the last response
+        final_text = ""
+        for item in current_response.output:
+            if item.type == "message":
+                if item.content:
+                    for block in item.content:
+                        if hasattr(block, 'text'):
+                            final_text += block.text
+                
+        return final_text
