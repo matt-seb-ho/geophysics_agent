@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -15,7 +16,7 @@ from geos_agent.tools.base import Tool
 
 class GeosAgent:
     """
-    Single-agent loop using OpenRouter's Chat Completions API.
+    Single-agent loop using OpenRouter's Chat Completions API with streaming.
     - Maintains conversation history (short-term memory)
     - Uses function calling (tools)
     - Runs tools in a loop until no tool calls are requested
@@ -74,16 +75,66 @@ class GeosAgent:
     def _get_tool_specs(self) -> List[Dict[str, Any]]:
         return [t.get_spec() for t in self.tools]
 
-    def _call_model(self) -> Any:
-        """Call OpenRouter Chat Completions API."""
-        response = self.client.chat.completions.create(
+    def _call_model_streaming(self) -> tuple[str, List[Any]]:
+        """Call OpenRouter Chat Completions API with streaming."""
+        stream = self.client.chat.completions.create(
             model=self.config.model,
             messages=self.messages,
             tools=self._get_tool_specs(),
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
+            stream=True,
         )
-        return response
+        
+        # Accumulate the response
+        full_content = ""
+        tool_calls_data: Dict[int, Dict[str, Any]] = {}  # index -> {id, name, arguments}
+        
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if not delta:
+                continue
+            
+            # Handle text content
+            if delta.content:
+                print(delta.content, end="", flush=True)
+                full_content += delta.content
+            
+            # Handle tool calls (they come in chunks)
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tool_calls_data:
+                        tool_calls_data[idx] = {
+                            "id": "",
+                            "name": "",
+                            "arguments": "",
+                        }
+                    if tc.id:
+                        tool_calls_data[idx]["id"] = tc.id
+                    if tc.function:
+                        if tc.function.name:
+                            tool_calls_data[idx]["name"] = tc.function.name
+                        if tc.function.arguments:
+                            tool_calls_data[idx]["arguments"] += tc.function.arguments
+        
+        # Convert accumulated tool calls to a list
+        tool_calls = []
+        for idx in sorted(tool_calls_data.keys()):
+            tc_data = tool_calls_data[idx]
+            # Create a simple object-like structure
+            tool_calls.append(type("ToolCall", (), {
+                "id": tc_data["id"],
+                "function": type("Function", (), {
+                    "name": tc_data["name"],
+                    "arguments": tc_data["arguments"],
+                })(),
+            })())
+        
+        if full_content:
+            print()  # Newline after streaming
+        
+        return full_content, tool_calls
 
     def _run_tool_call(self, tool_call) -> Dict[str, Any]:
         """Execute a tool call and return a tool message."""
@@ -116,6 +167,8 @@ class GeosAgent:
                 "content": result_str,
             }
 
+        print(f"[Running tool: {name}]", file=sys.stderr)
+        
         try:
             output_obj = tool.run(**args)
             if isinstance(output_obj, str):
@@ -149,7 +202,7 @@ class GeosAgent:
 
     def run(self, user_input: str) -> str:
         """
-        Run a full agent loop using Chat Completions API.
+        Run a full agent loop with streaming output.
         """
         self._log("user_input", content=user_input)
 
@@ -162,14 +215,23 @@ class GeosAgent:
         for step in range(1, self.config.max_steps + 1):
             self._log("step_start", step=step)
             
-            response = self._call_model()
-            message = response.choices[0].message
+            assistant_text, tool_calls = self._call_model_streaming()
             
-            # Add assistant message to history
-            self.messages.append(message.model_dump())
-
-            assistant_text = message.content or ""
-            tool_calls = message.tool_calls or []
+            # Build assistant message for history
+            assistant_message: Dict[str, Any] = {"role": "assistant", "content": assistant_text}
+            if tool_calls:
+                assistant_message["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in tool_calls
+                ]
+            self.messages.append(assistant_message)
 
             self._log(
                 "model_reply",

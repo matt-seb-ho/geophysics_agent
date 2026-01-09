@@ -67,9 +67,7 @@ def main():
     print(f"Instruction: {instruction}")
     print("--------------------------------------------------")
 
-    final_answer = agent.run(instruction)
-    print("\n=== Final answer ===\n")
-    print(final_answer)
+    agent.run(instruction)
 
 
 if __name__ == "__main__":
