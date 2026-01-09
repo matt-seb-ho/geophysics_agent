@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -14,9 +15,9 @@ from geos_agent.tools.base import Tool
 
 class GeosAgent:
     """
-    Single-agent loop, inspired by Leonie Monigatti's 'AI agent from scratch' tutorial.
+    Single-agent loop using OpenRouter's Chat Completions API.
     - Maintains conversation history (short-term memory)
-    - Uses OpenAI function calling (tools)
+    - Uses function calling (tools)
     - Runs tools in a loop until no tool calls are requested
     """
 
@@ -28,7 +29,13 @@ class GeosAgent:
         log_path: Optional[Path] = None,
     ):
         self.workspace_root = Path(workspace_root).resolve()
-        self.client = OpenAI()
+        
+        # Initialize OpenAI client with OpenRouter base URL
+        self.client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.environ.get("OPENROUTER_API_KEY"),
+        )
+        
         self.config = config or AgentConfig()
         self.system_prompt = (
             "You are GEOS-Agent, an expert assistant for the GEOS / GEOSX software.\n"
@@ -67,33 +74,19 @@ class GeosAgent:
     def _get_tool_specs(self) -> List[Dict[str, Any]]:
         return [t.get_spec() for t in self.tools]
 
-    def _call_model(
-        self,
-        input_item: Any,
-        previous_response_id: Optional[str] = None,
-        instructions: Optional[str] = None,
-    ) -> Any:
-        """Call the OpenAI responses API."""
-        kwargs = {
-            "model": self.config.model,
-            "input": input_item,
-            "tools": self._get_tool_specs(),
-        }
-        if previous_response_id:
-            kwargs["previous_response_id"] = previous_response_id
-        if instructions:
-            kwargs["instructions"] = instructions
-
-        # v1/responses parameters (checking compatibility)
-        if hasattr(self.config, "temperature"):
-             pass
-        
-        # **api call**
-        response = self.client.responses.create(**kwargs)
+    def _call_model(self) -> Any:
+        """Call OpenRouter Chat Completions API."""
+        response = self.client.chat.completions.create(
+            model=self.config.model,
+            messages=self.messages,
+            tools=self._get_tool_specs(),
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+        )
         return response
 
     def _run_tool_call(self, tool_call) -> Dict[str, Any]:
-        """Execute a tool call and return a result item for v1/responses."""
+        """Execute a tool call and return a tool message."""
         name = tool_call.function.name
         args_str = tool_call.function.arguments or "{}"
 
@@ -105,11 +98,10 @@ class GeosAgent:
                 ensure_ascii=False,
             )
             self._log("tool_args_parse_error", tool=name, error=str(e), raw=args_str)
-            # Return a tool output item
             return {
-                "type": "function_call", 
-                "call_id": tool_call.call_id, 
-                "output": result_str
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": result_str,
             }
 
         tool = self.tool_map.get(name)
@@ -119,9 +111,9 @@ class GeosAgent:
             )
             self._log("tool_unknown", tool=name, args=args)
             return {
-                "call_id": tool_call.call_id,
-                "type": "function_call",
-                "output": result_str
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": result_str,
             }
 
         try:
@@ -137,9 +129,9 @@ class GeosAgent:
                 result_preview=result_str[:500],
             )
             return {
-                "call_id": tool_call.call_id,
-                "type": "function_call",
-                "output": result_str
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": result_str,
             }
         except Exception as e:
             result_str = json.dumps(
@@ -148,45 +140,41 @@ class GeosAgent:
             )
             self._log("tool_run_exception", tool=name, args=args, error=str(e))
             return {
-                "call_id": tool_call.call_id,
-                "type": "function_call",
-                "output": result_str
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": result_str,
             }
 
     # ------------- public API -------------
 
     def run(self, user_input: str) -> str:
         """
-        Run a full agent loop utilizing the v1/responses API.
+        Run a full agent loop using Chat Completions API.
         """
         self._log("user_input", content=user_input)
 
-        # Initial request
-        # For v1/responses, we send the user input and instructions.
-        current_response = self._call_model(
-            input_item=user_input,
-            instructions=self.system_prompt,
-        )
+        # Initialize messages with system prompt and user input
+        self.messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": user_input},
+        ]
 
         for step in range(1, self.config.max_steps + 1):
-            self._log("step_start", step=step, response_id=current_response.id)            
-            assistant_text = ""
-            tool_calls = []
+            self._log("step_start", step=step)
+            
+            response = self._call_model()
+            message = response.choices[0].message
+            
+            # Add assistant message to history
+            self.messages.append(message.model_dump())
 
-            for item in current_response.output:
-                if item.type == "message":
-                    # content is a list of content blocks
-                    if item.content:
-                        for block in item.content:
-                            if hasattr(block, 'text'):
-                                assistant_text += block.text
-                elif item.type == "function_call":
-                    tool_calls.append(item)
+            assistant_text = message.content or ""
+            tool_calls = message.tool_calls or []
 
             self._log(
                 "model_reply",
                 step=step,
-                content_preview=assistant_text[:200],
+                content_preview=assistant_text[:200] if assistant_text else "",
                 tools_requested=[tc.function.name for tc in tool_calls],
             )
 
@@ -195,26 +183,16 @@ class GeosAgent:
                 self._log("run_complete", step=step, outcome="no_tool_calls")
                 return assistant_text
 
-            # Execute tools
-            tool_outputs = []
+            # Execute tools and add results to messages
             for tc in tool_calls:
-                output_item = self._run_tool_call(tc)
-                tool_outputs.append(output_item)
-
-            # Feed back to model
-            current_response = self._call_model(
-                input_item=tool_outputs,
-                previous_response_id=current_response.id
-            )
+                tool_message = self._run_tool_call(tc)
+                self.messages.append(tool_message)
 
         self._log("max_steps_reached", max_steps=self.config.max_steps)
-        # Try to extract text from the last response
-        final_text = ""
-        for item in current_response.output:
-            if item.type == "message":
-                if item.content:
-                    for block in item.content:
-                        if hasattr(block, 'text'):
-                            final_text += block.text
-                
-        return final_text
+        
+        # Return the last assistant message content
+        for msg in reversed(self.messages):
+            if msg.get("role") == "assistant" and msg.get("content"):
+                return msg["content"]
+        
+        return ""

@@ -39,8 +39,8 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-5.1-codex-mini",
-        help="OpenAI model name.",
+        default="z-ai/glm-4.7",
+        help="OpenROuter model name.",
     )
     parser.add_argument(
         "--max-steps",
