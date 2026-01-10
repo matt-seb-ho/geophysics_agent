@@ -226,12 +226,14 @@ data/outputs/*
 !data/outputs/.gitkeep
 !data/vector_index/.gitkeep
 
-# Un-ignore processed subdirectories to allow .gitkeep files
+# Un-ignore processed subdirectories to reach .gitkeep, but re-ignore their contents
 !data/processed/
 !data/processed/.gitkeep
 !data/processed/concepts/
+data/processed/concepts/*
 !data/processed/concepts/.gitkeep
 !data/processed/examples/
+data/processed/examples/*
 !data/processed/examples/.gitkeep
 
 # GEOS file types
