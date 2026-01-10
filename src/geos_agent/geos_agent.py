@@ -49,7 +49,11 @@ class GeosAgent:
             "- Always explain what you are doing and why, especially before running "
             "any shell commands.\n"
             "- Treat all paths as relative to the workspace root unless explicitly "
-            "told otherwise."
+            "told otherwise.\n"
+            "- User-provided input files and generated XML input files should be in `data/inputs/`.\n"
+            "- GEOS simulation outputs should be directed to `data/outputs/`.\n"
+            "- For each simulation run, consider creating a unique subfolder in outputs "
+            "(e.g., `data/outputs/run_001/`) to prevent overwriting results."
         )
 
         self.messages: List[Dict[str, Any]] = []

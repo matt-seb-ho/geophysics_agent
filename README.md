@@ -19,6 +19,19 @@ A minimal AI agent for GEOS/GEOSX geophysics workflows.
    uv run geos-agent "your instruction here"
    ```
 
+## Project Structure
+
+```
+geophysics_agent/
+├── src/geos_agent/     # Agent source code
+├── data/
+│   ├── inputs/         # User input files and generated XML input files go here
+│   └── outputs/        # GEOS simulation results go here
+└── pyproject.toml
+```
+
+The `data/` directory is gitignored and keeps simulation data separate from source code.
+
 ## Configuration
 
 Default model: `z-ai/glm-4.7` (configurable via `--model` flag)

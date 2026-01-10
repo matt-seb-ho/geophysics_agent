@@ -1,8 +1,13 @@
 from pathlib import Path
 
 # this file: repo/src/geos_agent/constants.py
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# model slugs
-GPT5_MINI = "gpt-5-mini-2025-08-07"
+# Data directories
+DATA_DIR = PROJECT_ROOT / "data"
+INPUT_DIR = DATA_DIR / "inputs"
+OUTPUT_DIR = DATA_DIR / "outputs"
+
+# Ensure they exist
+INPUT_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
