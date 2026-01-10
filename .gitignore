@@ -206,10 +206,34 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# user input/geos-agent output
+# Data Directory Exclusions
+# Raw GEOS docs (clone of GEOS repo/rst files) - avoid bloating repo
+data/source/*
+
+# Processed knowledge base - regenerated from source
+data/processed/*
+
+# Vector embeddings - regenerated from processed docs
+data/vector_index/*
+
+# Runtime inputs and outputs
 data/inputs/*
 data/outputs/*
+
+# Keep the folder structure for new clones
+!data/source/.gitkeep
 !data/inputs/.gitkeep
 !data/outputs/.gitkeep
+!data/vector_index/.gitkeep
+
+# Un-ignore processed subdirectories to allow .gitkeep files
+!data/processed/
+!data/processed/.gitkeep
+!data/processed/concepts/
+!data/processed/concepts/.gitkeep
+!data/processed/examples/
+!data/processed/examples/.gitkeep
+
+# GEOS file types
 *.xml
 *.vtk

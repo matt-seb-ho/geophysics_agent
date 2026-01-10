@@ -1,0 +1,236 @@
+**Context:** Developerguide > Contributing > GitWorkflow > Documentation Branches
+
+## Documentation Branches
+A `docs` branch is focused on writing and improving the documentation for GEOS.
+The use of the `docs` branch name root applies to both sphinx documentation
+and doxygen documentation.
+The `docs` branch follows the same naming conventions as described in the :ref:`Feature_Branches`
+section.
+The html produced by a documentation branch should be proofread using sphinx/doxygen
+prior to merging into `develop`.
+
+
+# Keeping Your Branch Current
+Over the course of a long development effort in a single `feature` branch, a
+developer may need to either merge `develop` into their `feature` branch, or rebase
+their `feature` branch on `develop`.
+We do not have a mandate on how you keep your branch current, but we do have
+guidelines on the branch history when merging your branch into `develop`.
+Typically, merging `develop` into your branch is the easiest approach, but will
+lead to a complex relationship with `develop` with multiple interactions... which
+can lead to a confusing history.
+Conversely, rebasing your branch onto `develop` is more difficult, but will lead
+to a linear history within the branch.
+For a complex history, we will perform a squash merge into `develop`, thereby
+the work from the branch will appear as a single commit in `develop`.
+For clean branch histories where the individual commits are meaningful and should
+be preserved, we have the option to perform a merge commit in with the PR is merged
+into `develop`, with the addition of a merge commit, thus maintaining the commit history.
+
+
+# Branching off of a Branch
+During the development processes, sometimes it is appropriate to create a branch
+off of a branch.
+For instance, if there is a large collaborative development effort on the branch
+`feature/theMatrix`, and a developer would like to add a self-contained and easily
+reviewable contribution to that effort, he/she should create a branch as follows:
+
+``console
+  git checkout feature/theMatrix
+  git checkout -b feature/smith/dodgeBullets
+  git push -u origin feature/smith/dodgeBullets
+
+If `feature/smith/dodgeBullets` is intended to be merged into `feature/theMatrix`,
+and the commit history of `feature/theMatrix` is not changed via `git rebase`, then
+the process of merging the changes back into `feature/theMatrix` is fairly standard.
+
+However, if `feature/theMatrix` is merged into `develop` via a `squash merge`,
+and then `smith` would like to merge `feature/smith/dodgeBullets` into `develop`,
+there is a substantial problem due to the diverged history of the branches.
+Specifically, `feature/smith/dodgeBullets` branched off a commit in `feature/theMatrix`
+that does not exist in `develop` (because it was squash-merged).
+For simplicity, let us assume that the commit hash that `feature/smith/dodgeBullets`
+originated from is `CC`, and that there were commits `CA, CB, CC, CD` in `feature/theMatrix`.
+When `feature/theMatrix` was squash-merged, all of the changes appear in `develop` as commit `G`.
+To further complicate the situation, perhaps a complex PR was merged after `G`, resulting
+in `E` on develop.
+The situation is illustrated by:
+
+``console
+   A----B----C----D----E----F----G----E (develop)
+              \                 /
+               CA---CB---CC---CD        (feature/theMatrix)
+                          \
+                          CCA--CCB--CCC (feature/smith/dodgeBullets)
+
+In order to successfully merge `feature/smith/dodgeBullets` into `develop`, all
+commits present in `feature/smith/dodgeBullets` after `CC` must be included, while discarding
+`CA, CB`, which exist in `feature/smith/dodgeBullets` as part of its history, but not
+in `develop`.
+
+One "solution" is to perform a `git rebase --onto` of `feature/smith/dodgeBullets` onto
+`develop`.
+Specifically, we would like to rebase `CCA, CCB, CCC` onto `G`, and proceed with our
+development of `feature/smith/dodgeBullets`.
+This would look like:
+
+``console
+   git checkout develop
+   git pull
+   git checkout feature/smith/dodgeBullets
+   git rebase -onto G CC
+
+As should be apparent, we have specified the starting point as `G`, and the point
+at which we replay the commits in `feature/smith/dodgeBullets` as all commits
+AFTER `CC`.
+The result is:
+
+``console
+   A----B----C----D----E----F----G----E (develop)
+                                  \
+                                 CCA'--CCB'--CCC' (feature/smith/dodgeBullets)
+
+Now you may proceed with standard methods for keeping `feature/smith/dodgeBullets`
+current with `develop`.
+
+.. _Submitting_a_Pull_Request:
+
+# Submitting a Pull Request
+Once you have created your branch and pushed changes to Github, you can create a
+`Pull Request ](https://github.com/GEOS-DEV/GEOS/pulls) on Github.
+The PR creates a central place to review and discuss the ongoing work on the branch.
+Creating a pull request early in the development process is preferred as it allows
+for developers to collaborate on the branch more readily.
+
+
+   work is ongoing and the PR is not ready for testing, review, and merge consideration.
+
+When you create the initial draft PR, please ensure that you apply appropriate labels.
+Applying labels allows other developers to more quickly filter the live PRs and access
+those that are relevant to them. Always add the [new` label upon PR creation, as well
+as to the appropriate `type`, `priority`, and  `effort` labels. In addition, please
+also add any appropriate `flags`.
+
+
+
+   the PR to ensure they are appropriately resolved once the PR is merged.
+   In order to `link` the issue to the PR for automatic resolution, you must use
+   one of the keywords followed by the issue number (e.g. resolves #1020) in either
+   the main description of the PR, or a commit message.
+   Entries in PR comments that are not the main description or a commit message
+   will be ignored, and the issue will not be automatically closed.
+   A complete list of keywords are:
+
+   - close
+   - closes
+   - closed
+   - fix
+   - fixes
+   - fixed
+   - resolve
+   - resolves
+   - resolved
+
+   For more details, see the `Github Documentation ](https://docs.github.com/en/github/managing-your-work-on-github/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword).
+
+Once you are satisfied with your work on the branch, you may promote the PR out of
+draft status, which will allow our integrated testing suite to execute on the PR branch
+to ensure all tests are passing prior to merging.
+
+
+   The allowed prefixes are:
+
+   - feat: A new feature
+   - fix: A bug fix,
+   - docs: Documentation only changes,
+   - style: Changes that do not affect the meaning of the code (white-space, formatting, missing semi-colons, etc),
+   - refactor: A code change that neither fixes a bug nor adds a feature,
+   - perf: A code change that improves performance,
+   - test: Adding missing tests or correcting existing tests,
+   - build: Changes that affect the build system or external dependencies (example scopes: cmake),
+   - ci: Changes to our CI configuration files and scripts (example scopes: github),
+   - chore: Other changes that don't modify src or test files,
+   - revert: Reverts a previous commit,
+
+Once the tests are passing -- or in some cases immediately -- add the `flag: ready for review`
+label to the PR, and be sure to tag any relevant developers to review the PR. The PR
+*must* be approved by reviewers in order to be merged.
+
+Note that whenever a pull request is merged into `develop`, commits are either
+`squashed`, or preserved depending on the cleanliness of the history.
+
+
+# Keeping Submodules Current
+Whenever you switch between branches locally, pull changes from `origin` and/or
+`merge` from the relevant branches, it is important to update the submodules to
+move the `head` to the proper `commit`.
+
+```console
+  git submodule update --recursive
+
+You may also wish to modify your `git pull` behavior to update your submodules
+recursively for you in one command, though you forfeit some control granularity
+to do so. The method for accomplishing this varies between git versions, but
+as of git 2.15 you should be able to globally configure git to accomplish this via:
+
+``console
+   git config --global submodule.recurse true
+
+In some cases, code changes will require to rebaseline the `Integrated Tests`.
+If that is the case, you will need to modify the `integrated tests submodule`.
+Instructions on how to modify a submodule are presented in the following section.
+
+# Working on the Submodules
+Sometimes it may be necessary to modify one of the submodules. In order to do so,
+you need to create a pull request on the submodule repository. The following steps
+can be followed in order to do so.
+
+Move to the folder of the `submodule` that you intend to modify.
+
+``console
+  cd submodule-folder
+
+Currently the `submodule` is in detached head mode, so you first need to move
+to the main branch (either `develop` or `master`) on the
+submodule repository, pull the latest changes, and then create a new branch.
+
+```console
+  git checkout <main-branch>
+  git pull
+  git checkout -b <branch-name>
+
+You can perform some work on this branch, `add` and `commit` the changes and then push
+the newly created branch to the `submodule repository` on which you can eventually
+create a pull request using the same process discussed above in :ref:`Submitting_a_Pull_Request`.
+
+```console
+  git push --set-upstream origin <branch-name>
+
+
+# Resolving Submodule Changes in Primary Branch PRs
+When you conduct work on a submodule during work on a primary GEOS
+branch with an open PR, the merging procedure requires that the submodule referenced
+by the GEOS PR branch be consistent with the submodule in the main branch of the project.
+This is checked and enforced via our CI.
+
+Thus, in order to merge a PR that includes modifications to submodules, the various PRs for
+each repository should be staged and finalized, to the point they are all ready to be merged,
+with higher-level PRs in the merge hierarchy having the correct submodule references for the
+current main branch for their repository.
+
+Starting from the bottom of the submodule hierarchy, the PRs are resolved, after which the
+higher-level PRs with reference to a resolved PR must update their submodule references
+to point to the new main branch of the submodule with the just-resolved PR merged.
+After any required automated tests pass, the higher-level PRs can then be merged.
+
+The name of the main branch of each submodule is presented in the table below.
+
+================    ================
+Submodule           Main branch
+================    ================
+blt                 develop
+LvArray             develop
+integratedTests     develop
+hdf5_interface      master
+PVTPackage          master
+================    ================
