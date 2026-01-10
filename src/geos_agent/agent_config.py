@@ -8,3 +8,4 @@ class AgentConfig:
     max_tokens: int = 50000
     max_steps: int = 20
     reasoning: bool = True
+    mode: str = "auto"  # "auto" or "interactive"

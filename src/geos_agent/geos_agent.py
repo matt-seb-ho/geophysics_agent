@@ -36,9 +36,15 @@ class GeosAgent:
             base_url="https://openrouter.ai/api/v1",
             api_key=os.environ.get("OPENROUTER_API_KEY"),
         )
-
         self.config = config or AgentConfig()
-        self.system_prompt = (
+        self.config.mode = (self.config.mode or "auto").lower()
+
+        # base = (
+        # "You are GEOS-Agent, an expert assistant for GEOS / GEOSX.\n"
+        # "- Prefer small, incremental changes.\n"
+        # "- Explain before running commands.\n"
+        # )
+        base = (
             "You are GEOS-Agent, an expert assistant for the GEOS / GEOSX software.\n"
             "- Your workspace is restricted to the `data/` directory.\n"
             "- You can inspect and edit files in the workspace.\n"
@@ -57,10 +63,30 @@ class GeosAgent:
             "- After creating or modifying files, summarize the key changes you made "
             "and explain the structure of what was generated."
         )
+        if self.config.mode == "interactive":
+            base += (
+                "- You may ask clarifying questions using the ask_user tool.\n"
+                "- Before writing files or running shell commands, use confirm_action.\n"
+            )
+        else:
+            base += (
+                "- Do NOT ask the user questions via tools.\n"
+                "- If info is missing, make reasonable assumptions and state them.\n"
+                "- If assumptions would be risky, output a short list of required inputs.\n"
+            )
+        self.system_prompt = base
 
         self.messages: List[Dict[str, Any]] = []
-        self.tools = tools
-        self.tool_map = {t.name: t for t in tools}
+        # self.tools = tools
+        if self.config.mode == "interactive":
+            self.tools = tools
+        else:
+            # drop interactive tools in auto mode
+            self.tools = [
+                t for t in tools if t.name not in {"ask_user", "confirm_action"}
+            ]
+
+        self.tool_map = {t.name: t for t in self.tools}
         self.log_path = log_path
 
     # ------------- logging -------------
@@ -87,7 +113,7 @@ class GeosAgent:
         extra_body = {}
         if self.config.reasoning:
             extra_body["reasoning"] = {"enabled": True}
-        
+
         stream = self.client.chat.completions.create(
             model=self.config.model,
             messages=self.messages,
@@ -96,6 +122,7 @@ class GeosAgent:
             max_tokens=self.config.max_tokens,
             stream=True,
             extra_body=extra_body if extra_body else None,
+            tool_choice="auto",
         )
 
         # Accumulate the response
@@ -224,24 +251,23 @@ class GeosAgent:
 
     # ------------- public API -------------
 
-    def run(self, user_input: str) -> str:
-        """
-        Run a full agent loop with streaming output.
-        """
+    def start_session(self) -> None:
+        """Start/clear a session, keeping the system prompt."""
+        self.messages = [{"role": "system", "content": self.system_prompt}]
+
+    def step(self, user_input: str) -> str:
+        """One user turn + tool loop, appending to existing history."""
+        if not self.messages:
+            self.start_session()
+
         self._log("user_input", content=user_input)
+        self.messages.append({"role": "user", "content": user_input})
 
-        # Initialize messages with system prompt and user input
-        self.messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_input},
-        ]
-
-        for step in range(1, self.config.max_steps + 1):
-            self._log("step_start", step=step)
+        for step_idx in range(1, self.config.max_steps + 1):
+            self._log("step_start", step=step_idx)
 
             assistant_text, tool_calls = self._call_model_streaming()
 
-            # Build assistant message for history
             assistant_message: Dict[str, Any] = {
                 "role": "assistant",
                 "content": assistant_text,
@@ -262,26 +288,34 @@ class GeosAgent:
 
             self._log(
                 "model_reply",
-                step=step,
-                content_preview=assistant_text[:200] if assistant_text else "",
+                step=step_idx,
+                content_preview=(assistant_text or "")[:200],
                 tools_requested=[tc.function.name for tc in tool_calls],
             )
 
             if not tool_calls:
-                # No tools to run, we are done.
-                self._log("run_complete", step=step, outcome="no_tool_calls")
+                self._log("turn_complete", step=step_idx, outcome="no_tool_calls")
                 return assistant_text
 
-            # Execute tools and add results to messages
             for tc in tool_calls:
                 tool_message = self._run_tool_call(tc)
                 self.messages.append(tool_message)
 
         self._log("max_steps_reached", max_steps=self.config.max_steps)
+        return assistant_text or ""
 
-        # Return the last assistant message content
-        for msg in reversed(self.messages):
-            if msg.get("role") == "assistant" and msg.get("content"):
-                return msg["content"]
+    def run(self, user_input: str) -> str:
+        """Backwards compatible: one-shot session per call."""
+        self.start_session()
+        return self.step(user_input)
 
-        return ""
+    def interactive_cli(self) -> None:
+        """Simple REPL that keeps context and uses ask_user/confirm_action tools."""
+        self.start_session()
+        print("GEOS-Agent interactive session. Type 'exit' to quit.\n")
+        while True:
+            user_input = input("You> ").strip()
+            if user_input.lower() in ("exit", "quit"):
+                break
+            _ = self.step(user_input)
+            print()  # spacing
