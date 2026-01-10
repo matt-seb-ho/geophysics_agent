@@ -1,8 +1,7 @@
 import re
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Dict, Any
-
+from typing import Any, Dict, Iterable, List, Optional
 
 # extract examples from .rst sphinx doc files
 

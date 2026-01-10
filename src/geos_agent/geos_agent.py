@@ -30,13 +30,13 @@ class GeosAgent:
         log_path: Optional[Path] = None,
     ):
         self.workspace_root = Path(workspace_root).resolve()
-        
+
         # Initialize OpenAI client with OpenRouter base URL
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.environ.get("OPENROUTER_API_KEY"),
         )
-        
+
         self.config = config or AgentConfig()
         self.system_prompt = (
             "You are GEOS-Agent, an expert assistant for the GEOS / GEOSX software.\n"
@@ -85,21 +85,23 @@ class GeosAgent:
             max_tokens=self.config.max_tokens,
             stream=True,
         )
-        
+
         # Accumulate the response
         full_content = ""
-        tool_calls_data: Dict[int, Dict[str, Any]] = {}  # index -> {id, name, arguments}
-        
+        tool_calls_data: Dict[
+            int, Dict[str, Any]
+        ] = {}  # index -> {id, name, arguments}
+
         for chunk in stream:
             delta = chunk.choices[0].delta if chunk.choices else None
             if not delta:
                 continue
-            
+
             # Handle text content
             if delta.content:
                 print(delta.content, end="", flush=True)
                 full_content += delta.content
-            
+
             # Handle tool calls (they come in chunks)
             if delta.tool_calls:
                 for tc in delta.tool_calls:
@@ -117,23 +119,33 @@ class GeosAgent:
                             tool_calls_data[idx]["name"] = tc.function.name
                         if tc.function.arguments:
                             tool_calls_data[idx]["arguments"] += tc.function.arguments
-        
+
         # Convert accumulated tool calls to a list
         tool_calls = []
         for idx in sorted(tool_calls_data.keys()):
             tc_data = tool_calls_data[idx]
             # Create a simple object-like structure
-            tool_calls.append(type("ToolCall", (), {
-                "id": tc_data["id"],
-                "function": type("Function", (), {
-                    "name": tc_data["name"],
-                    "arguments": tc_data["arguments"],
-                })(),
-            })())
-        
+            tool_calls.append(
+                type(
+                    "ToolCall",
+                    (),
+                    {
+                        "id": tc_data["id"],
+                        "function": type(
+                            "Function",
+                            (),
+                            {
+                                "name": tc_data["name"],
+                                "arguments": tc_data["arguments"],
+                            },
+                        )(),
+                    },
+                )()
+            )
+
         if full_content:
             print()  # Newline after streaming
-        
+
         return full_content, tool_calls
 
     def _run_tool_call(self, tool_call) -> Dict[str, Any]:
@@ -168,7 +180,7 @@ class GeosAgent:
             }
 
         print(f"[Running tool: {name}]", file=sys.stderr)
-        
+
         try:
             output_obj = tool.run(**args)
             if isinstance(output_obj, str):
@@ -214,11 +226,14 @@ class GeosAgent:
 
         for step in range(1, self.config.max_steps + 1):
             self._log("step_start", step=step)
-            
+
             assistant_text, tool_calls = self._call_model_streaming()
-            
+
             # Build assistant message for history
-            assistant_message: Dict[str, Any] = {"role": "assistant", "content": assistant_text}
+            assistant_message: Dict[str, Any] = {
+                "role": "assistant",
+                "content": assistant_text,
+            }
             if tool_calls:
                 assistant_message["tool_calls"] = [
                     {
@@ -251,10 +266,10 @@ class GeosAgent:
                 self.messages.append(tool_message)
 
         self._log("max_steps_reached", max_steps=self.config.max_steps)
-        
+
         # Return the last assistant message content
         for msg in reversed(self.messages):
             if msg.get("role") == "assistant" and msg.get("content"):
                 return msg["content"]
-        
+
         return ""
