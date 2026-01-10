@@ -10,5 +10,8 @@ geos-agent = "geos_agent.main:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.uv]
+package = true
+
 [tool.uv.workspace]
 members = []
