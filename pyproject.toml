@@ -1,7 +1,11 @@
 [project]
 name = "geophysics_agent"
 version = "0.1.0"
-dependencies = ["openai>=2.14.0", "python-dotenv"]
+dependencies = [
+    "chromadb>=1.4.0",
+    "openai>=2.14.0",
+ "python-dotenv",
+]
 
 [project.scripts]
 # geos-agent = "geos_agent.tools.tools:main"
