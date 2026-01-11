@@ -5,16 +5,14 @@ A minimal AI agent for GEOS/GEOSX geophysics workflows.
 ## Setup
 
 1. **Install dependencies**:
-   ```bash
-   uv sync
-
+```bash
+uv sync
 ```
 
 2. **Configure Environment**:
 Set your OpenRouter API key in a `.env` file:
 ```
 OPENROUTER_API_KEY=your_key_here
-
 ```
 
 
@@ -27,7 +25,6 @@ The agent requires a processed local knowledge base to function. Run these three
 ```bash
 # Clone to a temporary location
 git clone [https://github.com/GEOS-DEV/GEOS.git](https://github.com/GEOS-DEV/GEOS.git) ~/repos/GEOS
-
 ```
 
 
@@ -35,7 +32,6 @@ git clone [https://github.com/GEOS-DEV/GEOS.git](https://github.com/GEOS-DEV/GEO
 This parses raw docs into atomic concepts and examples with inlined XML.
 ```bash
 python scripts/build_knowledge.py --geos-repo ~/repos/GEOS
-
 ```
 
 
@@ -43,7 +39,6 @@ python scripts/build_knowledge.py --geos-repo ~/repos/GEOS
 This generates embeddings for the knowledge base and saves them locally.
 ```bash
 python scripts/build_vector_index.py
-
 ```
 
 
@@ -54,7 +49,6 @@ Run the agent with your natural language instruction:
 
 ```bash
 uv run geos-agent "Create a simulation for multiphase flow in a porous medium"
-
 ```
 
 ## Project Structure
@@ -73,5 +67,4 @@ geophysics_agent/
 │   ├── inputs/               # Generated XML simulation inputs
 │   └── outputs/              # GEOS simulation results
 └── pyproject.toml
-
 ```
