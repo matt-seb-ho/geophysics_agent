@@ -210,9 +210,6 @@ __marimo__/
 # Raw GEOS docs (clone of GEOS repo/rst files) - avoid bloating repo
 data/source/*
 
-# Processed knowledge base - regenerated from source
-data/processed/*
-
 # Vector embeddings - regenerated from processed docs
 data/vector_index/*
 
@@ -225,16 +222,6 @@ data/outputs/*
 !data/inputs/.gitkeep
 !data/outputs/.gitkeep
 !data/vector_index/.gitkeep
-
-# Un-ignore processed subdirectories to reach .gitkeep, but re-ignore their contents
-!data/processed/
-!data/processed/.gitkeep
-!data/processed/concepts/
-data/processed/concepts/*
-!data/processed/concepts/.gitkeep
-!data/processed/examples/
-data/processed/examples/*
-!data/processed/examples/.gitkeep
 
 # GEOS file types
 *.xml
