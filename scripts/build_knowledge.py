@@ -66,11 +66,236 @@ class ProcessedExample:
 
 
 # ============================================================================
+# Literalinclude Processing
+# ============================================================================
+
+
+def parse_literalinclude_block(block: str) -> dict:
+    """
+    Parse a literalinclude directive block and extract all options.
+    
+    Args:
+        block: Complete directive block including `.. literalinclude::` line and options
+        
+    Returns:
+        Dict with keys: file_path, language, start_after, end_before, lines
+    """
+    result = {
+        "file_path": None,
+        "language": None,
+        "start_after": None,
+        "end_before": None,
+        "lines": None,
+    }
+    
+    lines = block.strip().split("\n")
+    if not lines:
+        return result
+    
+    # First line: .. literalinclude:: path/to/file
+    first_line = lines[0]
+    match = re.match(r"\.\.\s+literalinclude::\s*(.+)", first_line)
+    if match:
+        result["file_path"] = match.group(1).strip()
+    
+    # Parse options from subsequent lines
+    for line in lines[1:]:
+        line = line.strip()
+        if line.startswith(":language:"):
+            result["language"] = line.split(":", 2)[2].strip()
+        elif line.startswith(":start-after:"):
+            result["start_after"] = line.split(":", 2)[2].strip()
+        elif line.startswith(":end-before:"):
+            result["end_before"] = line.split(":", 2)[2].strip()
+        elif line.startswith(":lines:"):
+            result["lines"] = line.split(":", 2)[2].strip()
+    
+    return result
+
+
+def extract_content_between_markers(
+    content: str, start_marker: Optional[str], end_marker: Optional[str]
+) -> Optional[str]:
+    """
+    Extract content between start and end markers (exclusive).
+    
+    Args:
+        content: Full file content
+        start_marker: Marker after which to start extraction (exclusive)
+        end_marker: Marker before which to stop extraction (exclusive)
+        
+    Returns:
+        Extracted content or None if markers not found
+    """
+    if start_marker is None and end_marker is None:
+        return content
+    
+    start_idx = 0
+    end_idx = len(content)
+    
+    if start_marker:
+        pos = content.find(start_marker)
+        if pos == -1:
+            return None
+        # Find end of the line containing the marker
+        newline_pos = content.find("\n", pos)
+        start_idx = newline_pos + 1 if newline_pos != -1 else pos + len(start_marker)
+    
+    if end_marker:
+        pos = content.find(end_marker, start_idx)
+        if pos == -1:
+            return None
+        # Find start of the line containing the marker
+        end_idx = content.rfind("\n", start_idx, pos)
+        if end_idx == -1:
+            end_idx = pos
+    
+    extracted = content[start_idx:end_idx]
+    # Strip leading/trailing empty lines but preserve internal structure
+    lines = extracted.split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    
+    return "\n".join(lines)
+
+
+def search_source_for_markers(
+    source_root: Path, start_marker: str, end_marker: str
+) -> Optional[str]:
+    """
+    Search all files in source directory for content matching markers.
+    
+    Args:
+        source_root: Root directory to search
+        start_marker: The start-after marker to find
+        end_marker: The end-before marker to find
+        
+    Returns:
+        Extracted content or None if not found
+    """
+    # Search in inputFiles directory first (most likely location)
+    search_dirs = [
+        source_root / "inputFiles",
+        source_root / "src",
+        source_root,
+    ]
+    
+    extensions = [".xml", ".hpp", ".cpp", ".py"]
+    
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for ext in extensions:
+            for file_path in search_dir.rglob(f"*{ext}"):
+                try:
+                    content = file_path.read_text(encoding="utf-8")
+                    if start_marker in content and end_marker in content:
+                        extracted = extract_content_between_markers(
+                            content, start_marker, end_marker
+                        )
+                        if extracted:
+                            return extracted
+                except Exception:
+                    continue
+    
+    return None
+
+
+def resolve_literalinclude_path(
+    file_path: str, rst_file: Path, source_root: Path
+) -> Optional[Path]:
+    """
+    Resolve a literalinclude file path relative to the RST file.
+    
+    Args:
+        file_path: The path from the literalinclude directive
+        rst_file: Path to the RST file containing the directive
+        source_root: Root of the source documentation
+        
+    Returns:
+        Resolved absolute path or None if not found
+    """
+    # Try resolving relative to RST file's directory
+    rst_dir = rst_file.parent
+    resolved = (rst_dir / file_path).resolve()
+    if resolved.exists():
+        return resolved
+    
+    # Try resolving relative to source root
+    resolved = (source_root / file_path).resolve()
+    if resolved.exists():
+        return resolved
+    
+    # Try finding file by name in inputFiles
+    filename = Path(file_path).name
+    input_files_dir = source_root / "inputFiles"
+    if input_files_dir.exists():
+        for found in input_files_dir.rglob(filename):
+            return found
+    
+    return None
+
+
+def process_literalinclude(
+    block: str, rst_file: Path, source_root: Path
+) -> str:
+    """
+    Process a literalinclude directive and return markdown code block.
+    
+    Args:
+        block: The complete literalinclude directive block
+        rst_file: Path to the RST file containing the directive
+        source_root: Root of source documentation
+        
+    Returns:
+        Markdown code block with embedded content
+    """
+    parsed = parse_literalinclude_block(block)
+    
+    language = parsed.get("language") or "text"
+    start_marker = parsed.get("start_after")
+    end_marker = parsed.get("end_before")
+    
+    content = None
+    
+    # Try to resolve file path and read content
+    if parsed.get("file_path"):
+        resolved_path = resolve_literalinclude_path(
+            parsed["file_path"], rst_file, source_root
+        )
+        if resolved_path:
+            try:
+                file_content = resolved_path.read_text(encoding="utf-8")
+                content = extract_content_between_markers(
+                    file_content, start_marker, end_marker
+                )
+            except Exception:
+                pass
+    
+    # Fallback: search source files for markers
+    if content is None and start_marker and end_marker:
+        content = search_source_for_markers(source_root, start_marker, end_marker)
+    
+    if content is None:
+        # Return a placeholder comment
+        marker_info = f"start={start_marker}, end={end_marker}" if start_marker else ""
+        return f"<!-- Code snippet not found: {parsed.get('file_path', 'unknown')} {marker_info} -->\n"
+    
+    return f"```{language}\n{content}\n```\n"
+
+
+# ============================================================================
 # RST to Markdown Conversion
 # ============================================================================
 
 
-def rst_to_markdown(rst_content: str) -> str:
+def rst_to_markdown(
+    rst_content: str,
+    rst_file: Optional[Path] = None,
+    source_root: Optional[Path] = None,
+) -> str:
     """
     Convert RST content to Markdown.
 
@@ -108,8 +333,27 @@ def rst_to_markdown(rst_content: str) -> str:
     # Convert bullet lists (already compatible with Markdown)
     # RST: * item or - item
 
-    # Remove RST directives that don't translate well
-    md = re.sub(r"\.\. \w+::\s*.*$", "", md, flags=re.MULTILINE)
+    # Process literalinclude directives - embed code inline
+    if rst_file is not None and source_root is not None:
+        # Pattern to match literalinclude blocks with their options
+        # Matches: .. literalinclude:: path\n  :option: value\n  :option2: value2
+        literalinclude_pattern = re.compile(
+            r"(\.\.\s+literalinclude::\s*[^\n]+\n(?:\s+:[^\n]+\n)*)",
+            re.MULTILINE
+        )
+        
+        def replace_literalinclude(match):
+            block = match.group(1)
+            return process_literalinclude(block, rst_file, source_root)
+        
+        md = literalinclude_pattern.sub(replace_literalinclude, md)
+    
+    # Remove remaining RST directives that don't translate well
+    # (skip literalinclude since we processed it above)
+    md = re.sub(r"\.\.\s+(?!literalinclude)\w+::\s*.*$", "", md, flags=re.MULTILINE)
+    
+    # Clean up orphaned directive options (lines starting with :option:)
+    md = re.sub(r"^\s+:[a-z-]+:\s*.*$", "", md, flags=re.MULTILINE)
 
     return md
 
@@ -199,7 +443,7 @@ def process_user_guide_to_concepts(
         List of AtomicConcept objects
     """
     rst_content = rst_file.read_text(encoding="utf-8")
-    md_content = rst_to_markdown(rst_content)
+    md_content = rst_to_markdown(rst_content, rst_file=rst_file, source_root=source_root)
 
     # Try splitting by H2 headers first (##), then H1 (#) if no H2 found
     chunks = split_by_headers(md_content, level=2)
@@ -326,7 +570,7 @@ def process_example_with_inline_xml(
     """
     try:
         rst_content = example_rst.read_text(encoding="utf-8")
-        md_content = rst_to_markdown(rst_content)
+        md_content = rst_to_markdown(rst_content, rst_file=example_rst, source_root=source_root)
 
         # Extract title (first non-empty line)
         title = "Unknown Example"
@@ -472,11 +716,15 @@ def write_concept_to_file(concept: AtomicConcept, output_dir: Path) -> None:
 
 
 def write_example_to_file(example: ProcessedExample, output_dir: Path) -> None:
-    """Write a ProcessedExample to a Markdown file with inlined XML."""
+    """Write a ProcessedExample to a Markdown file.
+    
+    Note: XML code snippets are now embedded inline within the explanation
+    via literalinclude processing, so we no longer append the full XML file.
+    """
     example_path = output_dir / f"{example.example_id}.md"
     example_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Combine explanation and XML into single file
+    # Build content with explanation (XML is embedded inline via literalinclude)
     content_parts = [
         f"# {example.title}",
         "",
@@ -492,12 +740,6 @@ def write_example_to_file(example: ProcessedExample, output_dir: Path) -> None:
             "## Explanation",
             "",
             example.explanation,
-            "",
-            "## XML Input File",
-            "",
-            "```xml",
-            example.xml_content,
-            "```",
             "",
         ]
     )
