@@ -40,7 +40,7 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default="z-ai/glm-4.7",
+        default="moonshotai/kimi-k2.5",
         help="OpenROuter model name.",
     )
     parser.add_argument(
