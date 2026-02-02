@@ -10,23 +10,28 @@ DATA_DIR = PROJECT_ROOT / "data"
 INPUT_DIR = DATA_DIR / "inputs"
 OUTPUT_DIR = DATA_DIR / "outputs"
 
-# Knowledge Base Paths (RAG documentation pipeline)
-SOURCE_DOCS_DIR = DATA_DIR / "source"
-PROCESSED_DOCS_DIR = DATA_DIR / "processed"
-VECTOR_INDEX_DIR = DATA_DIR / "vector_index"
+# Knowledge Base Paths
+GEOS_SOURCE_DIR = DATA_DIR / "geos_source"  # Raw GEOS docs (RST/XML)
+CHUNKS_DIR = DATA_DIR / "chunks"            # Processed hierarchical chunks
+VECTOR_DB_DIR = DATA_DIR / "vector_db"      # ChromaDB storage
+NAV_GRAPH_PATH = DATA_DIR / "nav_graph.json"
 
-# Processed documentation subdirectories
-CONCEPTS_DIR = PROCESSED_DOCS_DIR / "concepts"
-EXAMPLES_DIR = PROCESSED_DOCS_DIR / "examples"
+# ChromaDB collection names
+COLLECTION_NAVIGATOR = "geos_navigator"     # RST prose for navigation
+COLLECTION_TECHNICAL = "geos_technical"     # XML schema/tags
 
-# Ensure strict existence of critical directories
+# Processed chunk subdirectories
+NAVIGATOR_CHUNKS_DIR = CHUNKS_DIR / "navigator"
+TECHNICAL_CHUNKS_DIR = CHUNKS_DIR / "technical"
+
+# Ensure critical directories exist
 for path in [
     INPUT_DIR,
     OUTPUT_DIR,
-    SOURCE_DOCS_DIR,
-    PROCESSED_DOCS_DIR,
-    VECTOR_INDEX_DIR,
-    CONCEPTS_DIR,
-    EXAMPLES_DIR,
+    GEOS_SOURCE_DIR,
+    CHUNKS_DIR,
+    VECTOR_DB_DIR,
+    NAVIGATOR_CHUNKS_DIR,
+    TECHNICAL_CHUNKS_DIR,
 ]:
     path.mkdir(parents=True, exist_ok=True)

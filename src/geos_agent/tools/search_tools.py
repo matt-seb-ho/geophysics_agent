@@ -1,26 +1,171 @@
+"""
+Search tools for GEOS documentation RAG.
+
+Two collections:
+- Navigator (geos_navigator): RST prose for conceptual navigation
+- Technical (geos_technical): XML shadow embeddings for syntax lookup
+"""
+
 import os
 import chromadb
 from chromadb.utils import embedding_functions
-from typing import Any, Dict
+from typing import Any, Dict, List
 from pathlib import Path
 from dotenv import load_dotenv
 
 from .base import Tool
 
+import sys
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.geos_agent.constants import (
+    VECTOR_DB_DIR,
+    COLLECTION_NAVIGATOR,
+    COLLECTION_TECHNICAL,
+)
+
 load_dotenv()
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-VECTOR_DB_PATH = PROJECT_ROOT / "data" / "vector_index"
-COLLECTION_NAME = "geos_docs"
 
-# NOTE: web search currently stubs; to be implemented later.
+def get_embedding_function():
+    """Get the embedding function (shared between tools)."""
+    api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    return embedding_functions.OpenAIEmbeddingFunction(
+        api_key=api_key,
+        api_base="https://openrouter.ai/api/v1",
+        model_name="qwen/qwen3-embedding-8b",
+    )
 
 
+class SearchNavigatorTool(Tool):
+    """Search RST prose for conceptual navigation (Collection A)."""
+    
+    name = "search_navigator"
+    description = (
+        "Search GEOS documentation for conceptual understanding. "
+        "Use this to find which tutorial, guide, or section covers a topic. "
+        "Returns document titles, breadcrumbs, and source paths."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Natural language question or topic to search for.",
+            },
+            "n_results": {
+                "type": "integer",
+                "description": "Number of results to return (default: 5).",
+            },
+        },
+        "required": ["query"],
+    }
+
+    def __init__(self):
+        self.client = chromadb.PersistentClient(path=str(VECTOR_DB_DIR))
+        self.embedding_fn = get_embedding_function()
+        self.collection = self.client.get_collection(
+            name=COLLECTION_NAVIGATOR,
+            embedding_function=self.embedding_fn,
+        )
+
+    def run(self, query: str, n_results: int = 5) -> Dict[str, Any]:
+        try:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=n_results,
+            )
+
+            formatted = []
+            for i, doc in enumerate(results["documents"][0]):
+                meta = results["metadatas"][0][i]
+                formatted.append({
+                    "title": meta["title"],
+                    "breadcrumbs": meta["breadcrumbs"],
+                    "type": meta["chunk_type"],
+                    "source": meta["source_path"],
+                    "preview": doc[:200] + "..." if len(doc) > 200 else doc,
+                })
+
+            return {
+                "query": query,
+                "results": formatted,
+                "hint": "Use fetch_code to read the full source file if needed.",
+            }
+
+        except Exception as e:
+            return {"error": f"Search failed: {str(e)}"}
+
+
+class SearchTechnicalTool(Tool):
+    """Search XML shadow embeddings for syntax lookup (Collection B)."""
+    
+    name = "search_technical"
+    description = (
+        "Search for specific XML tags, parameters, or code syntax. "
+        "Use this to find exact tag names, attributes, and example usage. "
+        "Returns xml_reference pointers for lazy loading with fetch_code."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Technical query: tag name, parameter, or syntax pattern.",
+            },
+            "n_results": {
+                "type": "integer",
+                "description": "Number of results to return (default: 5).",
+            },
+        },
+        "required": ["query"],
+    }
+
+    def __init__(self):
+        self.client = chromadb.PersistentClient(path=str(VECTOR_DB_DIR))
+        self.embedding_fn = get_embedding_function()
+        self.collection = self.client.get_collection(
+            name=COLLECTION_TECHNICAL,
+            embedding_function=self.embedding_fn,
+        )
+
+    def run(self, query: str, n_results: int = 5) -> Dict[str, Any]:
+        try:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=n_results,
+            )
+
+            formatted = []
+            for i, doc in enumerate(results["documents"][0]):
+                meta = results["metadatas"][0][i]
+                formatted.append({
+                    "title": meta["title"],
+                    "xml_reference": meta.get("xml_reference", ""),
+                    "line_range": meta.get("line_range", ""),
+                    "breadcrumbs": meta["breadcrumbs"],
+                    "shadow_text": doc[:300] + "..." if len(doc) > 300 else doc,
+                })
+
+            return {
+                "query": query,
+                "results": formatted,
+                "hint": "Use fetch_code with xml_reference and line_range to read actual XML.",
+            }
+
+        except Exception as e:
+            return {"error": f"Search failed: {str(e)}"}
+
+
+# Legacy compatibility: combined search
 class SearchGeosDocsTool(Tool):
+    """Combined search across both collections (legacy compatibility)."""
+    
     name = "search_geos_docs"
     description = (
-        "Search the GEOS documentation for concepts, examples, and XML syntax. "
-        "Returns the most relevant text chunks from the documentation."
+        "Search GEOS documentation across both conceptual and technical content. "
+        "For precise control, use search_navigator or search_technical instead."
     )
     parameters = {
         "type": "object",
@@ -28,67 +173,45 @@ class SearchGeosDocsTool(Tool):
             "query": {
                 "type": "string",
                 "description": "The natural language question or topic to search for.",
-            }
+            },
         },
         "required": ["query"],
     }
 
     def __init__(self):
-        # Initialize connection once when tool is created
-        self.client = chromadb.PersistentClient(path=str(VECTOR_DB_PATH))
-        
-        # Must match the embedding function used in the build script
-        self.openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-            api_key=os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY"),
-            api_base="https://openrouter.ai/api/v1",  # Must match build script
-            model_name="qwen/qwen3-embedding-8b"
-        )
-        self.collection = self.client.get_collection(
-            name=COLLECTION_NAME,
-            embedding_function=self.openai_ef
-        )
+        self.navigator = SearchNavigatorTool()
+        self.technical = SearchTechnicalTool()
 
     def run(self, query: str) -> Dict[str, Any]:
-        try:
-            # Retrieve top 3 most relevant matches
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=3
-            )
+        nav_results = self.navigator.run(query, n_results=2)
+        tech_results = self.technical.run(query, n_results=2)
+        
+        return {
+            "query": query,
+            "navigator_results": nav_results.get("results", []),
+            "technical_results": tech_results.get("results", []),
+            "hint": "Use search_navigator for concepts, search_technical for syntax.",
+        }
 
-            # Format results for the Agent to read
-            formatted_results = []
-            for i, doc in enumerate(results['documents'][0]):
-                meta = results['metadatas'][0][i]
-                formatted_results.append(f"--- Result {i+1} (Source: {meta['source']}) ---\n{doc}\n")
-
-            return {
-                "query": query,
-                "results": "\n".join(formatted_results)
-            }
-
-        except Exception as e:
-            return {"error": f"Search failed: {str(e)}"}
 
 class SearchWebTool(Tool):
+    """Web search stub (not yet implemented)."""
+    
     name = "search_web"
-    description = (
-        "Search the web for relevant information. "
-        "Currently a stub: it returns a placeholder message."
-    )
+    description = "Search the web for relevant information. Currently a stub."
     parameters = {
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
                 "description": "Web search query.",
-            }
+            },
         },
         "required": ["query"],
     }
 
     def run(self, query: str) -> Dict[str, Any]:
-        # TODO: wire up to a real web search / RAG
+        # TODO
         return {
             "query": query,
             "warning": "search_web is not yet implemented in this environment.",
