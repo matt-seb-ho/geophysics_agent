@@ -40,8 +40,8 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default="moonshotai/kimi-k2.5",
-        help="OpenROuter model name.",
+        default="z-ai/glm-4.7",
+        help="OpenRouter model name.",
     )
     parser.add_argument(
         "--max-steps",
