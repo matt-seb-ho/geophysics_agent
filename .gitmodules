@@ -1,0 +1,3 @@
+[submodule "data/geos_source"]
+	path = data/geos_source
+	url = https://github.com/GEOS-DEV/GEOS.git
