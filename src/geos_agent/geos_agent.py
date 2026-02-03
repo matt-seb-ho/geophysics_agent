@@ -53,7 +53,9 @@ class GeosAgent:
             "- User-provided input files and generated XML input files should be in `inputs/`.\n"
             "- GEOS simulation outputs should be directed to `outputs/`.\n"
             "- For each simulation run, consider creating a unique subfolder in outputs "
-            "(e.g., `outputs/run_001/`) to prevent overwriting results."
+            "(e.g., `outputs/run_001/`) to prevent overwriting results.\n"
+            "- After creating or modifying files, summarize the key changes you made "
+            "and explain the structure of what was generated."
         )
 
         self.messages: List[Dict[str, Any]] = []
