@@ -41,7 +41,7 @@ def main():
         "--model",
         type=str,
         default="z-ai/glm-4.7",
-        help="OpenROuter model name.",
+        help="OpenRouter model name.",
     )
     parser.add_argument(
         "--max-steps",

@@ -81,6 +81,11 @@ class GeosAgent:
 
     def _call_model_streaming(self) -> tuple[str, List[Any]]:
         """Call OpenRouter Chat Completions API with streaming."""
+        # Build extra body for reasoning models
+        extra_body = {}
+        if self.config.reasoning:
+            extra_body["reasoning"] = {"enabled": True}
+        
         stream = self.client.chat.completions.create(
             model=self.config.model,
             messages=self.messages,
@@ -88,6 +93,7 @@ class GeosAgent:
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
             stream=True,
+            extra_body=extra_body if extra_body else None,
         )
 
         # Accumulate the response

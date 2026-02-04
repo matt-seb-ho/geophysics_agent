@@ -4,7 +4,8 @@ from typing import List
 from .base import Tool
 from .file_tools import ReadFileTool, WriteFileTool
 from .geos_tool import RunGeosTool
-from .search_tools import SearchGeosDocsTool, SearchWebTool
+from .search_tools import SearchNavigatorTool, SearchTechnicalTool, SearchWebTool
+from .fetch_code import FetchCodeTool
 from .shell_tools import ListDirTool, PythonExecTool, ShellCommandTool
 
 
@@ -21,7 +22,10 @@ def build_default_tools(workspace_root: Path) -> List[Tool]:
         ListDirTool(data_root),
         ShellCommandTool(data_root),
         PythonExecTool(data_root),
-        SearchGeosDocsTool(),
+        # Dual-collection search tools
+        SearchNavigatorTool(),    # RST prose for navigation
+        SearchTechnicalTool(),    # XML syntax lookup
+        FetchCodeTool(),          # Lazy load code/XML
         SearchWebTool(),
         RunGeosTool(data_root),
     ]
