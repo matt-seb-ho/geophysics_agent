@@ -20,9 +20,8 @@ def main():
         description="GEOS-Agent: minimal file/code agent scaffold for GEOS workflows."
     )
     parser.add_argument(
-        "instruction",
+        "--instruction",
         type=str,
-        nargs="+",
         help="High-level natural language instruction for the agent.",
     )
     parser.add_argument(
@@ -63,12 +62,16 @@ def main():
         log_path=log_path,
     )
 
-    instruction = " ".join(args.instruction)
-    print(f"=== GEOS-Agent (workspace: {workspace_root}) ===")
-    print(f"Instruction: {instruction}")
-    print("--------------------------------------------------")
+    if args.instruction is not None:
+        instruction = " ".join(args.instruction)
+        print(f"=== GEOS-Agent (workspace: {workspace_root}) ===")
+        print(f"Instruction: {instruction}")
+        print("--------------------------------------------------")
 
-    agent.run(instruction)
+        agent.run(instruction)
+    else:
+        print("GEOS-Agent interactive mode. Type 'exit' or 'quit' to exit.")
+        agent.interactive_cli()
 
 
 if __name__ == "__main__":

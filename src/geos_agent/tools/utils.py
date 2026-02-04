@@ -7,6 +7,7 @@ from .geos_tool import RunGeosTool
 from .search_tools import SearchNavigatorTool, SearchTechnicalTool, SearchWebTool
 from .fetch_code import FetchCodeTool
 from .shell_tools import ListDirTool, PythonExecTool, ShellCommandTool
+from .user_io import AskUser, ConfirmAction
 
 
 def build_default_tools(workspace_root: Path) -> List[Tool]:
@@ -28,4 +29,6 @@ def build_default_tools(workspace_root: Path) -> List[Tool]:
         FetchCodeTool(),          # Lazy load code/XML
         SearchWebTool(),
         RunGeosTool(data_root),
+        AskUser(),
+        ConfirmAction(),
     ]
