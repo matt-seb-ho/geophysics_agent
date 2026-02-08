@@ -11,15 +11,15 @@ INPUT_DIR = DATA_DIR / "inputs"
 OUTPUT_DIR = DATA_DIR / "outputs"
 
 # Knowledge Base Paths
-# GEOS_SOURCE_DIR = DATA_DIR / "geos_source"  # Raw GEOS docs (RST/XML)
-GEOS_SOURCE_DIR = PROJECT_ROOT.parent.parent.parent / "data" / "brianliu" # point to ad hoc data source (brianliu) 
-CHUNKS_DIR = DATA_DIR / "chunks"            # Processed hierarchical chunks
-VECTOR_DB_DIR = DATA_DIR / "vector_db"      # ChromaDB storage
+# GEOS_SOURCE_DIR = DATA_DIR / "geos_source"  # original GEOS docs path (RST/XML)
+GEOS_SOURCE_DIR = Path("/data/brianliu")  # Absolute path to ad hoc GEOS source data
+CHUNKS_DIR = DATA_DIR / "chunks"  # Processed hierarchical chunks
+VECTOR_DB_DIR = DATA_DIR / "vector_db"  # ChromaDB storage
 NAV_GRAPH_PATH = DATA_DIR / "nav_graph.json"
 
 # ChromaDB collection names
-COLLECTION_NAVIGATOR = "geos_navigator"     # RST prose for navigation
-COLLECTION_TECHNICAL = "geos_technical"     # XML schema/tags
+COLLECTION_NAVIGATOR = "geos_navigator"  # RST prose for navigation
+COLLECTION_TECHNICAL = "geos_technical"  # XML schema/tags
 
 # Processed chunk subdirectories
 NAVIGATOR_CHUNKS_DIR = CHUNKS_DIR / "navigator"
