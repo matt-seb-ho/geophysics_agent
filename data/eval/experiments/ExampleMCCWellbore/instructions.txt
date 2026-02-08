@@ -1,0 +1,116 @@
+# Natural Language Specification for Modified Cam-Clay Wellbore Problem XML Configuration
+
+## 1. Simulation Type and Physical Problem
+
+This simulation models a drained vertical wellbore problem with elastoplastic deformation using the Modified Cam-Clay constitutive model. The physical scenario involves a wellbore subjected to isotropic horizontal stress and vertical stress, where increasing the wellbore supporting pressure causes the wellbore to expand. This expansion induces elastoplastic deformation in the surrounding formation rock, developing a plastic zone in the near-wellbore region. The simulation is quasi-static, meaning inertial effects are neglected. This is a solid mechanics problem without pore pressure variation (drained conditions).
+
+## 2. Solver Parameters and Settings
+
+Create a solid mechanics solver with the following specifications:
+- Solver name: "mechanicsSolver"
+- Solver type: SolidMechanicsLagrangianFEM (Lagrangian finite element formulation)
+- Problem type: QuasiStatic (no inertial effects)
+- Discretization method: Reference a finite element discretization named "FE1"
+- Material association: Reference a material named "rock"
+- Target regions: The computational domain cell block "cb1"
+
+## 3. Mesh Requirements
+
+Use the internal wellbore mesh generator (InternalWellbore) with the following specifications:
+
+**Domain Dimensions:**
+- Overall domain size: 10 meters × 5 meters × 2 meters
+- Initial wellbore radius: 0.1 meters
+
+**Wellbore Trajectory:**
+- Define a vertical well trajectory using coordinate points
+
+**Element Configuration:**
+- Element counts: 50 elements in radial direction, 40 elements in tangential direction, 2 elements in z-direction
+- Element type: Eight-node hexahedral elements (C3D8)
+- Enable automatic spacing for radial elements by setting autoSpaceRadialElems to 1 (this overrides manual nr values)
+- Set useCartesianOuterBoundary to 0 to enforce a Cartesian-aligned outer boundary on the outer block
+
+**Cell Block:**
+- Name the mesh cell block "cb1"
+- Mesh refinement should conform to the wellbore geometry
+
+## 4. Material Properties and Constitutive Models
+
+Define a single homogeneous material using the Modified Cam-Clay (ModifiedCamClay) constitutive model with the following parameters:
+
+- Material name: "rock"
+- Reference Pressure (Pr): 120 kPa
+- Shear Modulus (G): 4302 kPa
+- PreConsolidation Pressure (Pc): 169 kPa
+- Slope of Critical State Line (M): 1.2
+- Virgin Compression Index (cc): 0.072676
+- Recompression Index (cr): 0.014535
+- Density: Specify appropriate value in SI units (kg/m³)
+
+Note: All constitutive parameters should be specified in the International System of Units.
+
+## 5. Initial and Boundary Conditions
+
+### Initial Conditions (all must have initialCondition field set to 1):
+
+**In-situ Stress State:**
+- Horizontal stress (σh): -100 kPa (applied in both x and y directions as initial stress components)
+- Vertical stress (σv): -160 kPa (applied in z direction as initial stress component)
+
+**Initial Wellbore Traction:**
+- Apply initial compressive traction at the wellbore wall (face set "rneg"): -100 kPa at time t = 0 seconds
+
+### Boundary Conditions:
+
+**Wellbore Wall Loading (face set "rneg"):**
+- Traction type: normal (pressure applied as product of scale and outward face normal)
+- Scale value: -1.0e5 (representing -100 kPa base value)
+- Time-dependent loading: Use a table function named "timeFunction" to define the external load
+- The traction increases from -100 kPa to -300 kPa following a linear time history
+
+**Table Function for Time-Dependent Loading:**
+- Create a function named "timeFunction"
+- Define coordinates (time values) and corresponding values (magnitude multipliers)
+- The loading magnitude should increase linearly as time evolves
+- Final mud pressure: -300 kPa
+
+**Roller Constraints on Outer Boundaries:**
+- Apply displacement constraints on the following boundary faces:
+  - xneg face: Constrain displacement in x-direction (component 0) to zero
+  - xpos face: Constrain displacement in x-direction (component 0) to zero
+  - ypos face: Constrain displacement in y-direction (component 1) to zero
+  - yneg face: Constrain displacement in y-direction (component 1) to zero
+  - zpos face: Constrain displacement in z-direction (component 2) to zero
+  - zneg face: Constrain displacement in z-direction (component 2) to zero
+
+**Object Path Specifications:**
+- Use "nodeManager" in objectPath for displacement constraints (applied to element nodes)
+- Use "faceManager" in objectPath for traction boundary conditions (applied to element faces)
+
+## 6. Numerical Method Specifications
+
+Define a numerical methods section that includes:
+- A finite element discretization named "FE1"
+- This discretization should be compatible with the SolidMechanicsLagrangianFEM solver
+- Appropriate for eight-node hexahedral (C3D8) elements
+
+## 7. Output Requirements
+
+Configure output in silo format for visualization in VisIt:
+- Output stress field data, particularly the tangential stress component (σθθ)
+- Output displacement field data
+- Enable output of results for the near-wellbore region
+- Output should support comparison with analytical solutions for:
+  - Normal stress component distributions
+  - Stress path
+  - Supporting wellbore pressure
+  - Wellbore size
+
+## Additional Notes
+
+- The simulation requires two XML files: a base file containing solver, material, boundary conditions, and table function definitions, and a benchmark file containing the mesh definition
+- Use include/import mechanism to combine the base and benchmark files
+- Sign convention: Compressive stresses are negative in GEOS
+- The setName field in field specifications should reference predefined geometric sets (rneg for wellbore wall, xneg, xpos, ypos, yneg, zpos, zneg for outer boundaries)
+- fieldName must match registered field names in GEOS (e.g., for stress components and displacement)

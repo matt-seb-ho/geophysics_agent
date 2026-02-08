@@ -1,0 +1,93 @@
+# Natural Language Specification for CO2 Plume Evolution and Leakage Through Abandoned Well Simulation
+
+## Simulation Overview
+
+Create an XML configuration file for an isothermal, immiscible two-phase flow simulation modeling CO2 storage in geological formations. This benchmark problem simulates CO2 injection into a lower aquifer and subsequent leakage through an abandoned well that connects to an upper aquifer. The simulation must capture advective spreading of the CO2 plume and buoyancy-driven flow through the leaky well pathway.
+
+## Domain and Physical Setup
+
+The model domain represents a subsurface region located between 2840 and 3000 meters below the surface. The total domain dimensions are 1000 meters by 1000 meters by 160 meters in the x, y, and z directions respectively. The domain contains two aquifer layers separated by an aquitard, with two wells penetrating the formation: one CO2 injection well and one leaky abandoned well. The distance between the injection well and the leaky well is 100 meters.
+
+## Mesh Specifications
+
+Use the internal mesh generator (InternalMesh) to create a structured hexahedral mesh. The mesh must contain 112 elements in the x-direction, 101 elements in the y-direction, and 60 elements in the z-direction. Use C3D8 hexahedral element type throughout.
+
+Configure the mesh using a multi-block approach with 45 cell blocks arranged in a 5 by 3 by 3 configuration (5 blocks in x, 3 blocks in y, 3 blocks in z). The cell block names must be specified following a k-j-i indexing logic where the k index (z-direction) is the fastest varying and the i index (x-direction) is the slowest varying.
+
+For the well representations, create columns of hexahedral elements with individual cell dimensions of 0.2658 meters by 0.2658 meters by 1 meter. This specific cross-sectional dimension is chosen so that the rectangular cell area equals the cross-sectional area of cylindrical wells with a 0.15 meter radius.
+
+## Element Regions
+
+Define four CellElementRegion blocks to represent the different physical zones:
+
+1. An upper aquifer region named "aquiferTop" using the rock constitutive model named "rock"
+2. A lower aquifer region named "aquiferBottom" using the rock constitutive model named "rock"
+3. An injection well region named "injectionWell" using a well rock model named "rockWell"
+4. A leaky well region named "leakyWell" using the well rock model named "rockWell"
+
+Map appropriate cell blocks to each region based on their physical location. The aquitard between the aquifers should not be included in any flow region as it is treated as impermeable.
+
+## Flow Solver Configuration
+
+Configure a CompositionalMultiphaseFVM solver for isothermal immiscible two-phase flow. Use Two-Point Flux Approximation (TPFA) discretization. Set the target regions to include only the four active flow regions: aquiferTop, aquiferBottom, injectionWell, and leakyWell. The aquitard is excluded from the solver domain as it is considered impermeable.
+
+## Constitutive Models
+
+### Fluid Model
+Use a DeadOilFluid model to represent the immiscible, incompressible two-phase system (CO2 and brine). Configure the fluid with:
+- Constant density values for both phases as specified in the Class et al. (2009) benchmark
+- Constant viscosity values for both phases as specified in the benchmark
+- Formation volume factors set to 1.0 for all phases to represent incompressible behavior
+
+### Rock Models
+Define two rock models:
+1. A rock model named "rock" for the aquifer regions with porosity equal to 0.15 and incompressible behavior
+2. A rock model named "rockWell" for the well regions with higher permeability than the aquifers and porosity of 0.15
+
+Both rock models should assume isotropic properties.
+
+### Relative Permeability
+Implement linear relative permeability functions of saturation for both phases.
+
+### Capillary Pressure
+Capillary pressure should be set to zero (neglected) throughout the domain.
+
+## Initial Conditions
+
+Configure initial conditions using HydrostaticEquilibrium to establish a hydrostatic pressure distribution throughout the domain. Use the datum pressure and datum elevation values specified in the Class et al. (2009) benchmark reference.
+
+The domain must be initially fully saturated with brine. Define TableFunction entries in the Functions block:
+- A table named "initOilCompFracTable" for the initial CO2 component fraction (zero everywhere)
+- A table named "initWaterCompFracTable" for the initial brine component fraction (fully saturated)
+- A table named "initTempTable" defining a homogeneous temperature field (this value is not critical for isothermal simulation but must be provided)
+
+## Boundary Conditions
+
+### Lateral Boundaries
+Apply Dirichlet boundary conditions on all four lateral sides of the domain (east, west, south, and north faces). The boundary pressure values must equal the initial hydrostatic pressure distribution and remain constant throughout the simulation.
+
+Create Box geometry definitions in the Geometry section to define the four boundary face sets named "east", "west", "south", and "north". Define corresponding TableFunction entries to specify the pressure values at these boundaries based on depth.
+
+### Injection Source
+Apply a SourceFlux boundary condition to inject CO2 into the lower aquifer. Create a set named "source" located within the injectionWell cell element region. Set the injection rate using the scale attribute to 8.87 kg/s (constant rate throughout simulation). The injection is for CO2 only. Note that if the source set contains multiple cells, the total injection rate will be distributed equally among all cells in the set.
+
+## Output Configuration
+
+Configure VTK format output for visualization purposes. The output should capture:
+- CO2 saturation distribution
+- Pressure field
+- Time series data for calculating leakage rates
+
+The simulation should run for at least 1000 days to capture the full evolution of the CO2 plume and leakage behavior. Key validation metrics include the arrival time of CO2 at the leaky well (expected around 9.6 days using a 0.005% leakage rate threshold), the maximum leakage rate (expected around 0.219%), the time at maximum leakage (expected around 50.6 days), and the leakage rate at 1000 days (expected around 0.1172%).
+
+## Key Modeling Assumptions to Enforce
+
+The XML configuration must reflect these simplifying assumptions from the benchmark:
+- Isotropic formation properties
+- Isothermal conditions (no thermal solver coupling)
+- Immiscible phases with no mutual dissolution
+- Constant fluid densities and viscosities (incompressible fluids)
+- Linear relative permeability curves
+- Zero capillary pressure
+- Wells treated as porous media (no well model required)
+- No flow simulation in the aquitard layer

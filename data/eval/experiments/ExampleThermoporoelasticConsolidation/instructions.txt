@@ -1,0 +1,123 @@
+# Natural Language Specification for Thermoporoelastic Consolidation XML Configuration
+
+## Simulation Overview
+
+This configuration defines a one-dimensional thermoporoelastic consolidation simulation that models a fully coupled problem involving solid deformation, fluid flow, and heat transfer in saturated porous media. The simulation validates against the analytical solution provided by Bai (2005). The physical scenario involves a saturated soil column subjected to surface loading and heating, where the system experiences initial settlement due to drainage and compression, followed by gradual rebound as temperature diffuses into the domain.
+
+## Solver Configuration
+
+The simulation requires three solvers to be defined:
+
+### Primary Solvers
+
+1. **Solid Mechanics Solver**: Create a solver of type "SolidMechanicsLagrangianFEM" with the name "solidMechSolver". This handles the mechanical deformation using Lagrangian finite element methods.
+
+2. **Flow Solver**: Create a solver of type "SinglePhaseFVM" with the name "flowSolver". This handles single-phase fluid flow using a finite volume method with cell-centered discretization.
+
+3. **Coupling Solver**: Create a solver of type "SinglePhasePoromechanics" with the name "thermoPoroSolver". This solver binds the mechanics and flow solvers together. Configure it with the following critical settings:
+   - Set the "isThermal" flag to 1 to enable temperature evolution simulation
+   - Set the "couplingType" to "FullyImplicit" to request a fully coupled, fully implicit solution strategy
+   - Reference both the solidMechSolver and flowSolver within this coupling solver
+
+The degrees of freedom for this coupled system are: cell-centered pressure, cell-centered temperature, and mechanical displacements at mesh nodes.
+
+## Mesh Requirements
+
+The mesh should represent a one-dimensional column geometry configured as a slab in the y-direction. The mesh must define the following boundary node sets:
+- "xneg" and "xpos" for x-direction boundaries
+- "yneg" for the bottom surface
+- "ypos" for the top surface (where boundary conditions are applied)
+- "zneg" and "zpos" for z-direction boundaries
+
+The specific mesh dimensions are not explicitly stated, but the geometry should be a vertical column suitable for 1D consolidation analysis. Gravity should be set to zero in the problem specification.
+
+## Material Properties and Constitutive Models
+
+Define a homogeneous and isotropic domain using the following constitutive models:
+
+### Solid Mechanics Model (ElasticIsotropic)
+- Young's modulus: 6000.0 Pa
+- Poisson's ratio: 0.4
+- Thermal expansion coefficient: 9.0 × 10⁻⁷ per Kelvin
+- Note: Solid density is constant and not temperature-dependent; its value is not critical since gravity is zero
+
+### Porosity Model (BiotPorosity)
+- Porosity: 0.20
+- Configure the grainBulkModulus such that the resulting Biot's coefficient equals 1.0
+- This model updates porosity as a function of strain increment, pore pressure change, and temperature change
+
+### Internal Energy Model (SolidInternalEnergy)
+- Volumetric heat capacity: 167,200 J/(m³·K) (equivalent to 167.2 × 10³)
+- Set the referenceTemperature to the initial temperature (0 degrees Celsius)
+
+### Fluid Model (ThermalCompressibleSinglePhaseFluid)
+- Fluid viscosity: 0.001 Pa·s (10⁻³)
+- Fluid density should be specified as constant (not dependent on pressure or temperature)
+
+### Permeability Model (ConstantPermeability)
+- Permeability: 4.0 × 10⁻⁹ m²
+
+### Thermal Conductivity Model (SinglePhaseConstantThermalConductivity)
+- Thermal conductivity: 836 J/(m·s·K)
+
+## Initial Conditions
+
+Define initial conditions in the FieldSpecifications section with the "initialCondition" attribute set to 1 for the following fields:
+
+1. **Initial Pressure**: Initialize the pore pressure field throughout the domain (specific value needed based on problem setup, typically zero or hydrostatic)
+
+2. **Initial Temperature**: Set the initial temperature of the saturated soil to 0 degrees Celsius throughout the entire domain
+
+3. **Initial Effective Stress**: Initialize the effective stress field throughout the domain
+
+4. **Initial Displacements**: Initialize displacement fields (typically to zero)
+
+## Boundary Conditions
+
+### Zero-Displacement Boundary Conditions
+Apply zero-displacement constraints on the following boundaries to constrain the column appropriately:
+- "xneg" boundary: constrain displacement in x-direction
+- "xpos" boundary: constrain displacement in x-direction
+- "yneg" boundary: constrain displacement in y-direction (bottom of column, fixed base)
+- "zneg" boundary: constrain displacement in z-direction
+- "zpos" boundary: constrain displacement in z-direction
+
+Note: Do NOT apply displacement boundary condition on "ypos" (top surface) as this is where loading is applied. The geometry is a slab in the y-direction.
+
+### Top Surface Boundary Conditions (applied to "ypos")
+1. **Traction Boundary Condition**: Apply a surface traction stress of 1 Pa as compressive loading on the top surface
+
+2. **Temperature Boundary Condition**: Fix the temperature at 50 degrees Celsius on the top surface (non-isothermal boundary condition)
+
+3. **Pressure Boundary Condition**: Fix the pore pressure at 0 Pa on the top surface (drained condition)
+
+### Other Boundaries
+All other boundaries should be insulated (no heat flux) and sealed (no fluid flux), which is achieved by not specifying flux boundary conditions on those surfaces.
+
+## Numerical Method Specifications
+
+- Use a fully implicit solution strategy for the coupled thermoporomechanical system
+- The coupling solver should use "FullyImplicit" coupling type
+- Flow discretization uses finite volume method (FVM) with cell-centered variables
+- Mechanics discretization uses Lagrangian finite element method (FEM) with nodal displacements
+- The governing equations include:
+  - Mass conservation equation
+  - Energy balance equation
+  - Linear momentum balance equation (with total stress including pore pressure and temperature contributions)
+
+## Output Requirements
+
+Configure TimeHistory output to record the following field variables for result inspection and validation:
+1. Displacements (to track settlement and rebound behavior over time)
+2. Pressure (pore pressure evolution at different locations)
+3. Temperature (thermal diffusion into the domain over time)
+
+The outputs should capture the temporal evolution at different spatial locations within the slab to allow comparison with analytical solutions for pressure, temperature, and vertical displacement.
+
+## File Organization
+
+The simulation uses two XML input files:
+1. A base file containing constitutive models, field specifications, and common settings: "ThermoPoroElastic_consolidation_base.xml"
+2. A benchmark file containing solver definitions and simulation-specific parameters: "ThermoPoroElastic_consolidation_benchmark_fim.xml"
+
+These files are located in the "inputFiles/thermoPoromechanics/" directory structure, with the benchmark file likely including the base file.

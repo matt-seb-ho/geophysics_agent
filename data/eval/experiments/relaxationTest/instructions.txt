@@ -1,0 +1,171 @@
+# Natural Language Specification for Visco Extended Drucker-Prager Relaxation Test XML Configuration
+
+## Simulation Overview
+
+This configuration models a relaxation test on a viscoplastic solid using the Visco Extended Drucker-Prager constitutive model. The simulation predicts time-dependent deformation of a sample under displacement-controlled uniaxial loading with constant lateral confining stress. The problem is solved as a quasi-static solid mechanics analysis without fluid flow or inertial effects. The domain is homogeneous, isotropic, and isothermal.
+
+---
+
+## Solver Configuration
+
+Create a solid mechanics solver using the Lagrangian finite element formulation with the following specifications:
+
+- **Solver type**: SolidMechanicsLagrangianFEM (viscoplastic solver)
+- **Solver name**: Assign a name such as "mechanicsSolver"
+- **Problem type**: QuasiStatic (no inertial effects considered)
+- **Discretization method**: Reference a finite element discretization named "FE1" defined in the NumericalMethods section
+- **Target regions**: Apply the solver to a single region named "Domain"
+
+---
+
+## Mesh Specifications
+
+Use the internal mesh generator to create the computational domain with the following parameters:
+
+- **Mesh type**: InternalMesh
+- **Element type**: C3D8 (eight-node hexahedral brick elements)
+- **Number of elements**: 10 elements in the x-direction, 10 elements in the y-direction, and 10 elements in the z-direction (10x10x10 total = 1000 elements)
+- **Cell block naming**: Define a cell block collection (the documentation references "cb8" for element region paths)
+- **Region assignment**: Assign the mesh to a region called "Domain"
+
+Define appropriate nodesets and facesets for boundary condition application:
+- Face sets for: xpos (positive x-face), ypos (positive y-face), zpos (top face/positive z-face), xneg (negative x-face), yneg (negative y-face), zneg (bottom face/negative z-face)
+- A nodeset named "topPoint" for displacement history collection
+
+---
+
+## Constitutive Model and Material Properties
+
+Define a single homogeneous solid material using the Visco Extended Drucker-Prager constitutive model with the following properties:
+
+- **Constitutive model type**: ViscoExtendedDruckerPrager
+- **Material name**: "rock"
+- **Bulk modulus**: 10.0 GPa (specify in SI units: 10.0e9 Pa)
+- **Shear modulus**: 6.0 GPa (specify in SI units: 6.0e9 Pa)
+- **Default cohesion**: 0.1 MPa (specify in SI units: 0.1e6 Pa or 100000 Pa)
+- **Default initial friction angle**: 15.0 degrees
+- **Default residual friction angle**: 20.0 degrees (note: this is larger than the initial angle, indicating strain hardening behavior)
+- **Default hardening rate**: 0.0005 (dimensionless)
+- **Relaxation time**: 5000.0 seconds (key parameter for viscoplastic behavior)
+- **Density**: Must be specified in SI units (kg/m³)
+
+---
+
+## Initial Conditions
+
+Initialize the stress state throughout the domain with isotropic compressive stresses:
+
+- **Initial stress σxx**: -10.0 MPa (compressive, following GEOS sign convention)
+- **Initial stress σyy**: -10.0 MPa (compressive)
+- **Initial stress σzz**: -10.0 MPa (compressive)
+
+These initial stresses should be applied to all elements in the "Domain" region.
+
+---
+
+## Boundary Conditions
+
+Apply the following boundary conditions through the FieldSpecifications section:
+
+### Lateral Confining Stress (Traction Boundary Conditions)
+- Apply a constant compressive traction of -10.0 MPa on the "xpos" face (positive x-boundary)
+- Apply a constant compressive traction of -10.0 MPa on the "ypos" face (positive y-boundary)
+- The negative sign indicates compression per GEOS convention
+
+### Axial Displacement Loading (Displacement Boundary Condition)
+- Apply a controlled normal displacement on the "zpos" face (top surface) named "axialload"
+- **Loading schedule**:
+  - At time t = 0 seconds: Begin applying displacement
+  - Over 0.5 days (43,200 seconds): Gradually increase displacement magnitude to -0.001 (units consistent with mesh, likely meters)
+  - From 0.5 days to 2.0 days: Maintain constant displacement at -0.001 to allow stress relaxation
+- The negative value indicates compression/contraction in the z-direction
+
+### Roller Constraints (Displacement Constraints)
+- Apply zero normal displacement on "xneg" face (constrain displacement in negative x-direction)
+- Apply zero normal displacement on "yneg" face (constrain displacement in negative y-direction)  
+- Apply zero normal displacement on "zneg" face (constrain displacement in negative z-direction/bottom)
+
+---
+
+## Numerical Methods
+
+Define a finite element discretization in the NumericalMethods section:
+
+- **Discretization name**: "FE1"
+- **Method type**: Appropriate finite element space for C3D8 hexahedral elements
+- The discretization should be compatible with the Lagrangian solid mechanics formulation
+
+---
+
+## Time Stepping and Events
+
+Configure the simulation timeline:
+
+- **Total simulation duration**: 2.0 days (172,800 seconds)
+- **Loading phase**: 0 to 0.5 days (displacement ramping up)
+- **Relaxation phase**: 0.5 to 2.0 days (constant displacement, stress relaxation observed)
+
+Define events for:
+- Solver execution
+- Periodic data collection (time history output)
+- Output writing
+
+---
+
+## Output and Data Collection
+
+### Time History Collection Tasks
+
+Define PackCollection tasks for time series data:
+
+1. **Stress Collection Task**:
+   - Task name: "stressCollection"
+   - Field name: "rock_stress"
+   - Object path: "ElementRegions/Domain/cb8"
+   - Purpose: Collect stress history from elements in the domain
+
+2. **Displacement Collection Task**:
+   - Task name: "displacementCollection"
+   - Field name: "totalDisplacement"
+   - Set names: "topPoint"
+   - Purpose: Collect displacement history at selected nodes on top surface
+
+### Output Files
+
+Configure HDF5 time history output:
+- Generate "displacement_history.hdf5" containing nodal position and displacement time series
+- Generate "stress_history.hdf5" containing element center positions and stress time series
+
+### Periodic Events for Data Collection
+
+Create PeriodicEvent entries to trigger the stress and displacement collection tasks at regular intervals throughout the simulation.
+
+---
+
+## File Structure
+
+The configuration should be structured to potentially use two XML files:
+1. A base file containing solver definitions, constitutive models, field specifications, boundary conditions, and tasks
+2. A benchmark file containing mesh definition and including/referencing the base file
+
+Alternatively, a single consolidated XML file can contain all sections: Mesh, Solvers, NumericalMethods, Constitutive, FieldSpecifications, Tasks, Events, and Outputs.
+
+---
+
+## Summary of Key Numerical Values
+
+| Parameter | Value | Units |
+|-----------|-------|-------|
+| Bulk modulus | 10.0 | GPa |
+| Shear modulus | 6.0 | GPa |
+| Cohesion | 0.1 | MPa |
+| Initial friction angle | 15.0 | degrees |
+| Residual friction angle | 20.0 | degrees |
+| Hardening rate | 0.0005 | dimensionless |
+| Relaxation time | 5000.0 | seconds |
+| Initial/confining stress | -10.0 | MPa (all directions) |
+| Lateral traction | -10.0 | MPa |
+| Maximum axial displacement | -0.001 | (mesh units) |
+| Loading duration | 0.5 | days |
+| Relaxation duration | 1.5 | days |
+| Mesh elements | 10×10×10 | C3D8 hexahedra |

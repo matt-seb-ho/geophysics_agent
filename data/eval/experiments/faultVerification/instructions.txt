@@ -1,0 +1,118 @@
+# Natural Language Specification for Fault Verification Poroelastic Simulation
+
+## Overview and Simulation Type
+
+Create an XML configuration file for a coupled poromechanics simulation that models induced stresses along a normal fault in a pressurized reservoir. This is a verification study comparing numerical results against analytical solutions from Wu et al. (2020). The simulation uses plane strain deformation assumptions and couples solid mechanics with single-phase fluid flow.
+
+Two variants of this simulation are needed: one with an impermeable fault and one with a permeable fault. The difference between these cases lies solely in how the pressure buildup is applied.
+
+## Solver Configuration
+
+The simulation requires three solvers to be defined:
+
+### Mechanics Solver
+Define a solid mechanics solver of type SolidMechanicsLagrangianFEM. Name this solver "mechanicsSolver". This solver handles the mechanical deformation of the domain using the Lagrangian finite element method.
+
+### Flow Solver
+Define a single-phase flow solver of type SinglePhaseFVM. Name this solver "singlePhaseFlowSolver". This solver handles fluid flow using the finite volume method.
+
+### Coupling Solver
+Define a poromechanics coupling solver of type SinglePhasePoromechanics. Name this solver "poromechanicsSolver". Configure it to reference the fluid solver as "singlePhaseFlowSolver" and the solid solver as "mechanicsSolver". The target region should be "Domain" where both solvers interact with all constitutive models.
+
+## Mesh Specification
+
+Import an external mesh using VTKMesh. The mesh file is named "faultMesh.vtu" and should be referenced with a relative or absolute path from the XML file location. Assign the label "FaultModel" to this mesh object.
+
+The mesh characteristics are:
+- Domain length: 4000 meters
+- Domain width: 2000 meters  
+- Domain thickness: 1000 meters
+- Reservoir thickness: 300 meters
+- Fault vertical offset: 100 meters
+- Fault dip angle: 60 degrees
+- Element type: Quadrilateral elements (hexahedra in 3D)
+- The mesh includes local refinement to conform with the fault geometry
+- Two reservoir compartments are displaced by the fault
+- The mesh must be large enough to avoid boundary effects
+
+The mesh contains specific element regions including "97_hexahedra" (left reservoir compartment) and "96_hexahedra" (right reservoir compartment), and boundary sets including set "91" for the upper boundary.
+
+## Numerical Methods
+
+### Finite Element Method
+Define a finite element discretization method named "FE1" using linear basis functions with Gaussian quadrature rules. This is used by the coupling solver and solid mechanics solver.
+
+### Finite Volume Method
+Define a two-point flux approximation (TPFA) scheme named "singlePhaseTPFA" for the flow discretization.
+
+## Constitutive Models
+
+### Solid Material
+Define a porous elastic isotropic material model using the PorousElasticIsotropic constitutive type. Name this material "rock". The domain is homogeneous and isotropic, applying to both the reservoir and its surroundings (overburden and underburden).
+
+Material properties for rock:
+- Young's Modulus: 14.95 GPa (14.95e9 Pa)
+- Poisson's Ratio: 0.15
+- Grain Bulk Modulus: 71.2 GPa (71.2e9 Pa)
+- Matrix Permeability: 1.0×10⁻¹⁸ m²
+- Porosity: 0.3
+
+### Fluid Material
+Define a compressible single-phase fluid using the CompressibleSinglePhaseFluid constitutive type. Name this material "water".
+
+All material properties must be specified in SI units.
+
+## Initial Conditions
+
+Initialize the following field values across the domain:
+
+### Initial Stress State
+- Minimum horizontal total stress (σh): -60.0 MPa (-60.0e6 Pa)
+- Maximum horizontal total stress (σH): -60.0 MPa (-60.0e6 Pa) - note this is isotropic horizontal stress
+- Vertical total stress (σv): -70.0 MPa (-70.0e6 Pa)
+
+Note: Compressive stresses are negative following GEOS sign convention.
+
+### Initial Pressure
+- Initial reservoir pressure (p0): 35.0 MPa (35.0e6 Pa)
+
+## Boundary Conditions
+
+### Mechanical Boundary Conditions
+- Upper boundary (setNames containing "91"): Apply a normal traction of -70.0 MPa (-70.0e6 Pa) to maintain mechanical equilibrium. Define this as a field specification named "NormalTraction".
+- Lateral boundaries: Apply roller constraints (zero normal displacement)
+- Lower boundary: Apply roller constraint (zero normal displacement)
+
+### Pressure Boundary Conditions
+Apply a pressure buildup of 20.0 MPa on top of the initial reservoir pressure:
+
+**For impermeable fault case:**
+Apply constant pressure to the left compartment only. The object path is "ElementRegions/Domain/97_hexahedra". The total pressure in this region becomes initial pressure plus buildup (35.0 + 20.0 = 55.0 MPa).
+
+**For permeable fault case:**
+Apply constant pressure to both reservoir compartments. Use object paths "ElementRegions/Domain/97_hexahedra" and "ElementRegions/Domain/96_hexahedra". Both compartments receive the same pressure buildup.
+
+The overburden and underburden remain impermeable with no pressure changes applied.
+
+## Events and Time Control
+
+The simulation neglects transient fluid flow effects, treating the pressure buildup as essentially instantaneous. Configure the events to execute the poromechanics solver. The simulation should run until mechanical equilibrium is achieved with the applied pressure conditions.
+
+## Output Requirements
+
+Configure VTK-format output files for visualization in Paraview. The output should include:
+- Displacement fields across the domain
+- Stress tensor components, particularly:
+  - σxx (normal stress in x-direction)
+  - σyy (normal stress in y-direction)  
+  - σxy (shear stress)
+
+The primary results of interest are the changes in total stresses along the fault plane for comparison with analytical solutions.
+
+## File Organization
+
+The configuration should be split into:
+1. A base file (faultPoroelastic_base.xml) containing common elements: numerical methods, constitutive models, and general boundary/initial conditions
+2. A case-specific file (impermeableFault_benchmark.xml or permeableFault_benchmark.xml) containing: mesh specification, solver definitions, and case-specific pressure injection specifications
+
+The case-specific file should include or reference the base file to inherit common configurations.

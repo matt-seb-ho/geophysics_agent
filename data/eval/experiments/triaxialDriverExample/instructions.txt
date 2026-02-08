@@ -1,0 +1,105 @@
+# Natural Language Specification for Triaxial Driver Extended Drucker-Prager Simulation
+
+## Overview and Simulation Type
+
+This configuration describes a triaxial driver simulation for modeling rock mechanics laboratory experiments, specifically triaxial tests. The simulation uses the Extended Drucker-Prager elastoplastic constitutive model to investigate the mechanical behavior of rock samples under controlled loading conditions. This is not a full finite-element simulation but rather a material point driver that allows calibration of constitutive model parameters against experimental data before use in field-scale simulations.
+
+## Task Configuration (TriaxialDriver)
+
+Create a Tasks section containing a single TriaxialDriver task with the following specifications:
+
+- **Testing Mode**: Set to "mixedControl" which applies axial strain control combined with radial stress control, representing a conventional triaxial test configuration
+- **Axial Control**: Reference a table function named "strainFunction" that defines the axial strain history
+- **Radial Control**: Reference a table function named "stressFunction" that defines the confining pressure (radial stress) history
+- **Initial Stress**: Set to -10.0e6 Pa (negative value indicates compression per GEOS sign convention). This value must be consistent with the initial values in the loading functions to ensure static equilibrium at the first timestep
+- **Number of Load Steps**: 200 steps
+- **Material Reference**: Reference the material named "ExtendedDruckerPrager" defined in the Constitutive section
+- **Output File**: Specify "simulationResults.txt" as the output file name
+
+The task must be added to the Events section as a SoloEvent.
+
+## Constitutive Model (Material Properties)
+
+Define an Extended Drucker-Prager material model in the Constitutive section with the following properties:
+
+- **Model Name**: "ExtendedDruckerPrager"
+- **Initial Friction Angle**: Specify using defaultInitialFrictionAngle parameter (value to be set based on experimental data)
+- **Residual Friction Angle**: Specify using defaultResidualFrictionAngle parameter. For strain hardening behavior, this must be larger than the initial friction angle. For strain weakening, set it smaller than the initial value
+- **Cohesion**: Specify using defaultCohesion parameter (value in Pa)
+- **Hardening Rate**: Set defaultHardening to 0.0001
+- **Dilation Ratio**: Set defaultDilationRatio to 1.0 for an associated plastic flow rule
+- **Density**: Specify the material density (SI units: kg/m³)
+- **Bulk Modulus**: Specify the elastic bulk modulus (SI units: Pa)
+- **Shear Modulus**: Specify the elastic shear modulus (SI units: Pa)
+
+All parameters must be specified in SI units (International System of Units).
+
+## Functions (Loading History)
+
+Create a Functions section with two TableFunction definitions:
+
+### Strain Function (Axial Loading)
+- **Function Name**: "strainFunction"
+- **Input Variable**: time (specified as inputVarNames="{ time }")
+- **Purpose**: Defines the temporal variation of axial strain
+- **Coordinate File**: Reference external file "tables/time.geos" containing time values
+- **Values File**: Reference external file "tables/axialStrain.geos" containing corresponding axial strain values
+- **Note**: Values should be negative for compressive strains. The function should include loading/unloading cycles to capture both plastic loading and elastic unloading behavior
+
+### Stress Function (Radial Confinement)
+- **Function Name**: "stressFunction"
+- **Input Variable**: time (specified as inputVarNames="{ time }")
+- **Purpose**: Defines the temporal variation of radial confining stress
+- **Coordinate File**: Reference external file "tables/time.geos" (same as strain function)
+- **Values File**: Reference external file "tables/radialStress.geos" containing corresponding radial stress values
+- **Note**: For this specific test, the confining stress should be kept constant at -10.0e6 Pa (matching the initial stress). Values are negative for compressive stress
+
+### External Table Files Required
+Create the following table files in a "tables" subdirectory:
+1. **time.geos**: Contains time coordinate values for the loading history
+2. **axialStrain.geos**: Contains axial strain values corresponding to each time point
+3. **radialStress.geos**: Contains radial stress values corresponding to each time point (constant at -10.0e6 Pa)
+
+## Mesh Requirements
+
+Although the TriaxialDriver does not require spatial discretization, a dummy mesh must be defined to pass GEOS initialization checks:
+
+- **Mesh Type**: InternalMesh
+- **Mesh Name**: "mesh1" (or similar identifier)
+- **Configuration**: Minimal single-element mesh (results in 8 nodes and 1 element based on the expected output)
+
+Additionally, create an ElementRegions section with:
+- **Region Type**: CellElementRegion
+- **Region Name**: "dummy" (or similar identifier)
+- **Cell Blocks**: Assign the mesh cell block (e.g., "cellBlock01") to this region
+- **Note**: No discretization method is associated with this region for TriaxialDriver simulations
+
+## Events Configuration
+
+Create an Events section containing:
+- A SoloEvent that triggers the TriaxialDriver task
+- The event should reference the triaxial driver task defined in the Tasks section
+
+## Output Specification
+
+The simulation automatically generates an ASCII text output file with:
+- **File Name**: "simulationResults.txt"
+- **Format**: Space-delimited text file with header comments
+- **Columns**: 
+  1. time
+  2. axial_strain
+  3. radial_strain_1
+  4. radial_strain_2
+  5. axial_stress
+  6. radial_stress_1
+  7. radial_stress_2
+  8. newton_iter (number of Newton iterations)
+  9. residual_norm
+- **Rows**: Each row represents one timestep, starting from initial conditions (201 rows total for 200 steps plus initial state)
+
+## Additional Notes
+
+- The TriaxialDriver supports three testing modes: "strainControl" (both directions strain-controlled), "stressControl" (both directions stress-controlled), and "mixedControl" (axial strain, radial stress)
+- For volumetric tests, use "strainControl" mode with identical strain functions for axial and radial directions
+- For oedometer tests, use "strainControl" mode with radial strain set to zero
+- Once the constitutive model is calibrated using this driver, the same material definition can be used in full field-scale finite element simulations by adding appropriate solver, discretization, and boundary condition blocks

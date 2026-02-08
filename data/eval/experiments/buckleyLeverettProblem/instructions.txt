@@ -1,0 +1,139 @@
+# Natural Language Specification for Buckley-Leverett CO2 Core Flood Simulation
+
+## Simulation Overview
+
+Create an XML configuration file for simulating a CO2 core flood experiment representing immiscible two-phase flow (CO2 and water/brine) through porous media. This is a Buckley-Leverett verification problem that models the displacement of brine by supercritical CO2 injection in a quasi one-dimensional horizontal domain. The simulation assumes isothermal conditions, incompressible and immiscible phases, negligible capillary pressure and gravitational forces, and no poromechanical effects.
+
+## Solver Configuration
+
+Define a compositional multiphase flow solver using the finite volume method:
+- Solver type: CompositionalMultiphaseFVM
+- Solver name: "compflow"
+- Target region: "region"
+- Discretization method: Reference a numerical method named "fluidTPFA"
+- Initial reservoir temperature: 300 Kelvin
+- The simulation is isothermal (no thermal solver coupling)
+
+## Numerical Methods
+
+Define a Two-Point Flux Approximation (TPFA) discretization scheme:
+- Name the discretization "fluidTPFA"
+- This handles the flux calculations between neighboring cells for the multiphase flow
+
+## Mesh Specifications
+
+Use the internal mesh generator with the following parameters:
+- Element configuration: 1000 elements in the x-direction, 1 element in the y-direction, 1 element in the z-direction
+- Element type: C3D8 (eight-node hexahedral brick elements)
+- Cell block name: "cellBlock"
+- Domain dimensions based on the parameter table:
+  - Domain length (x-direction): 0.1 meters
+  - Domain width (y-direction): 1.0 meters
+  - Domain thickness (z-direction): 0.002 meters
+- The mesh should form a single region named "region"
+- The width must be large enough to ensure one-dimensional flow behavior
+
+## Geometry Definitions
+
+Define two Box geometry objects for boundary condition application:
+- A box named "source" representing the fluid inlet face
+- A box named "sink" representing the fluid outlet face
+
+## Constitutive Models
+
+### Fluid Model
+Use a DeadOilFluid model for the immiscible, incompressible two-phase system:
+- Phase names defined in order: gas, water (this order is critical for component indexing)
+- Reference external table files for fluid properties located in the buckleyLeverett_table directory
+- Constant fluid densities specified via tables
+- Constant fluid viscosities:
+  - Gas (CO2) viscosity: 2.3 × 10⁻⁵ Pa·s
+  - Water (brine) viscosity: 5.5 × 10⁻⁴ Pa·s
+- Formation volume factors: Set to 1.0 for both phases (incompressible assumption)
+
+### Relative Permeability Model
+Use Brooks-Corey relative permeability correlations:
+- Model type: BrooksCoreyRelativePermeability
+- Maximum relative permeability of gas phase: 1.0
+- Maximum relative permeability of water phase: 1.0
+- Corey exponent for gas phase: 3.5
+- Corey exponent for water phase: 3.5
+- Residual gas saturation: 0.0
+- Residual water saturation: 0.0
+
+### Porous Medium Properties
+Define rock/matrix properties:
+- Porosity: 0.2 (dimensionless)
+- Matrix permeability: 9.0 × 10⁻¹³ m²
+- The domain is homogeneous and isotropic
+
+### Capillary Pressure
+Capillary pressure is assumed negligible and should not be included or set to zero.
+
+## Initial Conditions
+
+Using FieldSpecification blocks, set the following initial conditions:
+- Initial pressure: Specify a uniform pressure field throughout the domain
+- Initial phase saturations: The domain is initially fully saturated with brine (water)
+  - Initial gas global component fraction (component="0"): Set to indicate no gas initially
+  - Initial water global component fraction (component="1"): Set to indicate full water saturation
+- Note: Component indices must match the order defined in the DeadOilFluid phaseNames attribute (component 0 = gas, component 1 = water)
+
+## Boundary Conditions
+
+### Inlet Boundary (Source)
+- Boundary type: Mass injection rate (SourceFlux)
+- Location: Apply to set named "source"
+- Injected component: Pure CO2 (component="0")
+- Scale value: -0.00007 (this represents the product of total flow rate and gas density, Q_T × ρ_g)
+- The negative sign indicates injection into the domain
+- Total volumetric flow rate being modeled: 2.5 × 10⁻⁷ m³/s
+
+### Outlet Boundary (Sink)
+- Location: Apply to set named "sink"
+- Specify pressure control (Dirichlet pressure boundary)
+- Specify composition control at the outlet
+
+## Events and Time Stepping
+
+Configure the simulation events:
+- Define periodic events for output and data collection
+- The simulation should run long enough to observe saturation front propagation (results shown at t = 70 seconds in the documentation)
+- Include periodic events to trigger the time history collection tasks
+
+## Output Requirements
+
+### VTK Output
+- Configure VTK-format output files for visualization in Paraview
+- Output should include phase saturations and pore pressure fields
+
+### Time History Collection
+Define a Tasks section with PackCollection tasks:
+- Task name: "phaseVolumeFractionCollection"
+- Field to collect: "phaseVolumeFraction"
+- Collection scope: Entire computational domain (or specified index sets)
+- Output filename: "saturationHistory" (will produce saturationHistory.hdf5)
+- File format: HDF5
+- The output file should contain:
+  - Simulation time data
+  - Element center coordinates
+  - Time history of phase volume fractions for both phases (gas and water)
+
+## File Structure
+
+The configuration should be split into two XML files:
+1. A base XML file containing the solver, constitutive models, boundary conditions, and tasks definitions
+2. A benchmark XML file containing the mesh definition that includes the base file
+
+External table files must be referenced from the buckleyLeverett_table directory for fluid property definitions.
+
+## Units
+
+All constitutive parameters must be specified in SI units:
+- Length: meters
+- Time: seconds
+- Pressure: Pascals
+- Viscosity: Pascal-seconds (Pa·s)
+- Permeability: square meters (m²)
+- Flow rate: cubic meters per second (m³/s)
+- Density: kilograms per cubic meter (kg/m³)

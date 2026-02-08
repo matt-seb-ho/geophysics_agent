@@ -1,0 +1,98 @@
+# Natural Language Specification for Viscosity-Dominated KGD Hydraulic Fracture Simulation
+
+## 1. Simulation Type and Physical Problem
+
+This simulation models a viscosity-dominated KGD (Khristianovic-Geertsma-de Klerk) hydraulic fracture problem. The physical scenario involves a single plane strain fracture propagating through an infinite elastic rock domain. The simulation operates in the viscosity-dominated regime, meaning more energy is expended moving the fracturing fluid through the fracture than splitting the intact rock. The fracture is assumed to always propagate following the fluid front.
+
+## 2. Solver Parameters and Settings
+
+Configure a coupled hydrofracture solver system that includes:
+
+- A **hydraulic fracture solver** for the coupled fluid-solid mechanics problem
+- A **surface generator** for fracture propagation tracking
+- The solver should handle plane strain conditions for the KGD geometry
+- Use fracture propagation criteria that follow the fluid front
+- The simulation should couple single-phase fluid flow with solid mechanics
+
+The surface generator must be configured to handle fracture creation and propagation. Set fracture propagation to occur based on fluid pressure exceeding the local stress state, with the understanding that in the viscosity-dominated regime, the rock toughness contribution is minimal.
+
+## 3. Mesh Requirements
+
+Create a mesh representing an effectively infinite elastic domain:
+
+- The mesh should be sufficiently large to approximate infinite boundary conditions (far-field stresses)
+- Use a structured or semi-structured mesh appropriate for plane strain analysis
+- Refine the mesh along the expected fracture propagation path
+- The benchmark version should have fine mesh resolution for validation accuracy
+- A coarser mesh version with shorter injection duration can be used for smoke testing
+- Element types should support the hydrofracture solver requirements (typically hexahedral or quadrilateral elements)
+- The fracture plane should be pre-defined along the propagation direction
+
+## 4. Material Properties and Constitutive Models
+
+### Rock Properties
+Define an elastic constitutive model for the rock with:
+- Young's modulus (E) and Poisson's ratio (ν) to establish the plane modulus E_p = E/(1-ν²)
+- **Ultra-low but non-zero fracture toughness (K_Ic)**: The value should be very small to ensure viscosity-dominated behavior, but must not be set to absolute zero as this causes numerical instability
+
+### Fluid Properties
+Define a **compressible single-phase fluid** model with:
+- **Viscosity: 1 centipoise (0.001 Pa·s)** - representing slickwater
+- **Negligible compressibility**: Set compressibility to zero or a very small value since fluid compressibility effects are neglected in this problem
+- Constant viscosity (no shear-rate dependence)
+
+## 5. Initial and Boundary Conditions
+
+### Initial Conditions
+- Initialize the domain with appropriate in-situ stress state
+- Set initial pore pressure if applicable
+- Define an initial fracture or perforation point at the injection location
+
+### Boundary Conditions
+- **Fluid injection**: Apply a constant volumetric injection rate (Q_0) at the fracture inlet point
+- **Far-field boundaries**: Apply appropriate boundary conditions to simulate infinite domain behavior (roller or fixed displacement conditions on outer boundaries)
+- **Fracture surfaces**: Allow fluid flow along fracture faces with appropriate leakoff conditions (minimal or zero leakoff for this validation case)
+
+### Injection Parameters
+Based on the expected results showing:
+- Fracture half-lengths growing from approximately 1.5 m to 3.5 m
+- Net pressures decreasing from approximately 1.075 MPa to 0.651 MPa
+- Apertures at inlet growing from approximately 0.118 mm to 0.222 mm
+- Over a time period of 2 to 10 seconds
+
+## 6. Numerical Method Specifications
+
+- Use appropriate time-stepping for the coupled hydrofracture problem
+- Configure the simulation to run for sufficient duration to capture fracture evolution (at least 10 seconds based on validation data)
+- Time step control should handle the coupled fluid-solid mechanics interaction
+- Newton-Raphson or similar nonlinear solver settings for the coupled system
+- Ensure numerical stability by avoiding zero toughness values
+
+## 7. Output Requirements
+
+Configure output to support validation and post-processing:
+
+### HDF5 Output
+Generate HDF5 output files containing:
+- **Fluid pressure** at the injection point (inlet)
+- **Fracture aperture (width)** at the injection point
+- **Fracture half-length** over time
+
+### Temporal Resolution
+Output should capture the time evolution at regular intervals, enabling comparison with analytical solutions for:
+- Time = 2, 4, 6, 8, 10 seconds (and beyond if needed)
+
+### Output Format
+Structure output data to include columns for:
+- Time (seconds)
+- Pressure (Pascals)
+- Aperture (meters)
+- Length (meters)
+
+The output should be compatible with the provided Python post-processing scripts (`hydrofractureQueries.py` and visualization scripts) that extract temporal evolution data into a text file format for verification against the Adachi and Detournay (2002) analytical solutions.
+
+## Additional Notes
+
+- This is a validation study, so results should be compared against the analytical asymptotic solutions for viscosity-dominated KGD fractures
+- The simulation validates that GEOS correctly captures the t^(2/3) fracture length growth and the characteristic pressure and aperture relationships
+- Two versions should be considered: a full benchmark version with fine mesh and longer duration, and a smoke test version with coarser mesh and shorter duration for quick verification

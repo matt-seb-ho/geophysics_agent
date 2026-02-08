@@ -1,0 +1,162 @@
+# Natural Language Specification for Multiphase Flow Simulation XML Configuration
+
+## 1. Simulation Type and Physical Problem
+
+This configuration sets up a multiphase, multicomponent flow simulation using GEOS. The physical problem models immiscible two-phase (Dead-Oil) flow through a heterogeneous reservoir. The permeability field corresponds to the two bottom layers (layers 84 and 85) of the SPE10 benchmark test case. The simulation includes water injection through a source term located in the center of the domain and oil/water production through sink terms positioned at each of the four corners. This mimics a five-spot well pattern typical in reservoir engineering studies.
+
+## 2. Solver Parameters and Settings
+
+### Primary Solver Configuration
+- Create a solver of type **CompositionalMultiphaseFVM** which implements a fully implicit finite-volume scheme based on standard two-point flux approximation (TPFA)
+- Name the solver "compflow" (this name will be referenced by events)
+- Set the target region to "reservoir"
+- Set a small initial time step (initialDt) relative to the problem's time scale, specified in seconds (the example uses 1000 seconds as initial dt)
+- Reference the fluid discretization scheme by name (pointing to the numerical methods block)
+- Reference the fluid constitutive model by name
+
+### Nonlinear Solver Parameters
+- Configure nonlinear tolerance settings
+- Enable line search capability with lineSearchAction set to "Attempt" if Newton solver struggles
+- Configure heuristics for time step size control (time step increases when convergence occurs in less than 40% of maximum nonlinear iterations)
+
+### Linear Solver Parameters
+- Use an iterative linear solver type: either "gmres" or "fgmres"
+- Set preconditioner type to "mgr" (multigrid reduction) for large multiphase problems
+- Configure linear tolerance
+- Note: Requires GEOS to be configured with the Hypre linear solver package
+
+## 3. Mesh Requirements
+
+### Internal Mesh Generator
+- Use the **InternalMesh** generator to create the computational domain
+- Mesh dimensions must match the SPE10 test case specifications for layers 84 and 85
+- All dimensional values specified in meters
+- Cell sizes should correspond to the SPE10 grid resolution for the bottom two layers
+- Element type should be hexahedral cells appropriate for finite-volume discretization
+
+## 4. Geometry Definitions
+
+Define five box-shaped geometric objects for applying boundary conditions:
+
+1. **Source box** (named "source"): Located in the middle of the domain for injection
+2. **Sink box 1** (named "sink1"): Located at one corner for production
+3. **Sink box 2** (named "sink2"): Located at second corner for production
+4. **Sink box 3** (named "sink3"): Located at third corner for production
+5. **Sink box 4** (named "sink4"): Located at fourth corner for production
+
+These boxes are used to select cells where boundary conditions will be applied in the FieldSpecifications block.
+
+## 5. Material Properties and Constitutive Models
+
+### Fluid Model
+- Use **DeadOilFluid** model for immiscible two-phase thermodynamic behavior
+- Define phase names as "oil" and "water" (order matters and must be consistent throughout)
+- Include table functions for oil properties:
+  - Oil formation volume factor table (B_o_table)
+  - Oil viscosity table (visc_o_table)
+- Properties should match the original SPE10 test case specifications
+- All units in SI
+
+### Relative Permeability Model
+- Use **BrooksCoreyRelativePermeability** model
+- Phase names must exactly match those in the fluid model: "oil" and "water" in the same order
+- Define appropriate Brooks-Corey parameters for both phases
+
+### Rock Porosity Model
+- Define a porosity model (name it "rock")
+- Include reference porosity and compressibility values
+- Use a table function (poroFunc) for spatially varying porosity corresponding to SPE10 data
+
+### Rock Permeability Model
+- Define permeability model
+- Use table functions for heterogeneous permeability field:
+  - permxFunc for x-direction permeability
+  - permyFunc for y-direction permeability  
+  - permzFunc for z-direction permeability
+- Values should correspond to SPE10 layers 84 and 85 data
+
+## 6. Element Regions
+
+Create a **CellElementRegion** with the following specifications:
+- Name: "reservoir"
+- cellBlocks: set to "{ * }" to automatically include all mesh cells
+- materialList: include references to "fluid", "rock", and "relperm" constitutive models
+
+## 7. Initial and Boundary Conditions
+
+### Initial Conditions
+All values in SI units:
+
+- **Initial Pressure**: Specify initial reservoir pressure using a FieldSpecification targeting the entire reservoir region
+- **Initial Oil Component Fraction**: Set using component=0 (matching the first phase in phaseNames)
+- **Initial Water Component Fraction**: Set using component=1 (matching the second phase in phaseNames)
+
+### Boundary Conditions for Sinks (Production)
+For each of the four sink locations (sink1, sink2, sink3, sink4):
+- Set fixed pressure using FieldSpecification (mimics pressure-controlled wells before breakthrough)
+- Set composition at sink locations to specify produced fluid components
+
+### Source Term (Injection)
+- Use **SourceFlux** block to impose fixed mass injection rate
+- Inject component 1 (water) to mimic a rate-controlled injection well
+- Name the source flux "sourceTerm"
+- Specify the mass injection rate in kg/s
+
+### Geological Properties
+- Porosity field specification referencing the porosity table function
+- Permeability field specifications (x, y, z directions) referencing respective table functions
+
+## 8. Numerical Method Specifications
+
+Create a **FiniteVolume** numerical method block:
+- Use two-point flux approximation (TPFA) scheme for flux discretization
+- This discretizes the governing equations on the reservoir mesh
+- Name the discretization scheme appropriately for reference by the solver
+
+## 9. Events Configuration
+
+### Solver Application Event
+- Create a **PeriodicEvent** named "solverApplications"
+- Target the solver "compflow"
+- Set maxEventDt to control maximum time step size (in seconds)
+- Time stepping adapts based on solver convergence behavior
+
+### Output Event
+- Create a **PeriodicEvent** named "outputs"
+- Set timeFrequency to control output interval (in seconds)
+- Set targetExactTimestep=1 to ensure outputs occur at exact specified times
+- Target: "vtkOutput"
+
+### Statistics Event
+- Create a **PeriodicEvent** named "sourceFluxStatsEvent"
+- Target the source flux statistics task
+- Set appropriate frequency for statistics reporting
+
+## 10. Tasks Configuration
+
+Create a **SourceFluxStatistics** task:
+- Purpose: Monitor mass balance and flow rates for source flux wells
+- Set writeCSV="1" to output detailed statistics to a CSV file (fluxesStats.csv)
+- Set logLevel="1" for console output (1=sum of fluxes, 2=per-flux details, 3=per-region details)
+- Set fluxNames to include the source flux name or use "*" for all fluxes
+- Set flowSolverName to "compflow"
+
+## 11. Output Requirements
+
+Create a **VTK** output block:
+- Name: "vtkOutput" (must match the name referenced in the output event)
+- Format: VTK for Paraview compatibility
+- Output files will have .pvd extension
+- Results will include pressure and saturation fields for visualization
+
+## Summary of Named References
+
+Ensure consistent naming throughout the configuration:
+- Solver name: "compflow"
+- Region name: "reservoir"
+- Fluid model name: "fluid"
+- Rock model name: "rock"
+- Relative permeability name: "relperm"
+- VTK output name: "vtkOutput"
+- Source flux name: "sourceTerm"
+- Geometry boxes: "source", "sink1", "sink2", "sink3", "sink4"

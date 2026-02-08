@@ -1,0 +1,145 @@
+# Natural Language Specification for Toughness-Dominated KGD Hydraulic Fracture Simulation
+
+## 1. Simulation Type and Physical Problem
+
+This configuration models a **toughness-dominated KGD (Khristianovic-Geertsma-de Klerk) hydraulic fracture** propagating under plane-strain conditions in an infinite, homogeneous, elastic medium. The simulation represents a two-dimensional vertical fracture with a rectangular cross-section, driven by fluid injection at a constant rate over a specified time period.
+
+The physical assumptions include:
+- Vertical and impermeable fracture surfaces (no fluid leakoff)
+- Fluid flow governed by the lubrication equation (combining mass conservation and Poiseuille's law)
+- Toughness-dominated regime, meaning more energy is expended splitting intact rock than moving the fracturing fluid
+- Fracture propagation occurs when stress intensity factor exceeds rock toughness
+- Gravity effects are ignored
+- Only half of the fracture wing is modeled due to symmetry
+
+## 2. Required Solver Parameters and Settings
+
+### 2.1 Surface Generator Solver
+Create a `SurfaceGenerator` solver that defines the rock fracture toughness parameter. This solver controls when new fracture surfaces are created based on the stress intensity factor criterion.
+
+### 2.2 Solid Mechanics Solver
+Create a `SolidMechanicsLagrangianFEM` solver with:
+- Target regions that include both the continuum rock region and the fracture region
+- A contact relation name specifying the contact constitutive behavior
+- Solid material names referencing the elastic rock properties
+
+### 2.3 Single Phase Flow Solver
+Create a `SinglePhaseFVM` solver using the finite volume method to solve single-phase fluid flow within the fracture.
+
+### 2.4 Hydrofracture Coupled Solver
+Create a `Hydrofracture` solver that couples:
+- Fluid flow within the fracture
+- Rock deformation
+- Fracture opening and closure
+- Fracture propagation
+
+Set the coupling type option to `FIM` (Fully Implicit Method) for a fully coupled solution scheme. This solver should reference the solid mechanics solver, the flow solver, and the surface generator.
+
+## 3. Mesh Requirements
+
+Use the **internal mesh generator** with the following specifications:
+
+### Domain Sizing Guidelines
+- The domain in the x-direction (perpendicular to the fracture plane) must be at least **10 times** the final fracture half-length to minimize boundary effects
+- The domain in the y-direction (along the fracture plane) should be at least **2 times** the fracture half-length
+- The z-direction requires a **minimum of 2 layers** to ensure accurate comparison with analytical solutions (due to node-based fracture propagation criterion)
+
+### Mesh Refinement
+- Apply a bias parameter (`xBias`) in the x-direction to refine elements near the fracture plane
+- Element type should be compatible with the Lagrangian finite element solid mechanics formulation
+
+### Element Regions
+Define at least two regions:
+1. A continuum region for the bulk rock matrix
+2. A fracture region for the propagating hydraulic fracture (named "Fracture" with a subregion "FractureSubRegion")
+
+## 4. Material Properties and Constitutive Models
+
+### 4.1 Fluid Properties (CompressibleSinglePhaseFluid)
+Configure a compressible single-phase fluid constitutive model with:
+- **Viscosity**: 1.0 × 10⁻⁶ Pa·s (equivalent to 0.001 centipoise - ultra-low viscosity required for toughness-dominated regime)
+- Define default and reference values for viscosity, compressibility, and density
+- The fluid should be treated as essentially incompressible for this toughness-dominated case
+
+### 4.2 Rock Properties (ElasticIsotropic)
+Configure an isotropic elastic constitutive model with:
+- **Young's modulus (E)**: 30 GPa
+- **Poisson's ratio (ν)**: 0.25
+- A density value must be specified but is not used since gravity is ignored
+
+### 4.3 Rock Toughness
+- **Fracture toughness (K_Ic)**: 1 MPa·m^(1/2)
+- This is defined within the SurfaceGenerator solver parameters
+
+### 4.4 Contact Relation
+Define a contact constitutive behavior for the fracture surfaces, referenced by the solid mechanics solver.
+
+## 5. Initial and Boundary Conditions
+
+### 5.1 Initial Fracture Definition
+Create a **nodeset** defining a small area where the KGD fracture initiates and begins propagation. Then create a `FieldSpecification` that sets the `ruptureState` condition for this initial fracture nodeset, indicating these elements are already fractured at simulation start.
+
+### 5.2 Fracture Plane Definition
+Define a **separable nodeset** that outlines the predefined plane within which the KGD fracture will propagate. This reduces computational cost by constraining fracture growth to a known plane. Create a corresponding `FieldSpecification` to mark this nodeset as a potential fracture plane.
+
+### 5.3 Fluid Injection Source
+Create a `SourceFlux` boundary condition for fluid injection with:
+- **Injection rate**: The scale value should be set to (Q₀ × ρ_f) / 2, where Q₀ = 1.0 × 10⁻⁴ m³/s
+- The factor of 1/2 accounts for modeling only half the fracture wing due to symmetry
+- **Important**: The boundary condition specifies **mass injection rate**, not volumetric rate
+- Apply this flux to a sub-area of the initial fracture
+
+## 6. Numerical Method Specifications
+
+### Coupling Scheme
+- Use the Fully Implicit Method (FIM) coupling type for the Hydrofracture solver to ensure stable coupling between:
+  - Mechanical deformation
+  - Fluid flow
+  - Fracture propagation
+
+### Spatial Discretization
+- Solid mechanics: Lagrangian finite element method
+- Fluid flow: Finite volume method (FVM)
+
+### Fracture Propagation Criterion
+- Node-based criterion comparing stress intensity factor to rock toughness
+- Requires minimum 2 layers in z-direction for accuracy
+
+## 7. Output Requirements
+
+### 7.1 Time History Collection Tasks
+Create a `Tasks` section with `PackCollection` tasks to collect time history data:
+
+1. **pressureCollection**: Collects fluid pressure in the fracture
+2. **apertureCollection**: Collects fracture aperture (width)
+3. **hydraulicApertureCollection**: Collects hydraulic aperture values
+4. **areaCollection**: Collects fracture element areas
+
+All tasks should have:
+- `objectPath` set to `"ElementRegions/Fracture/FractureSubRegion"`
+
+### 7.2 Event Management
+Create a `PeriodicEvent` in the Events section to trigger the PackCollection tasks at regular intervals throughout the simulation.
+
+### 7.3 Output File
+Configure output to write an HDF5 file (suggested name: `kgdToughnessDominated_output.hdf5`) containing:
+- Simulation time
+- Fluid pressure history
+- Element aperture history
+- Hydraulic aperture history
+- Element area history
+
+This data enables verification against analytical solutions for:
+- Fracture length evolution (ℓ)
+- Net pressure at injection point (p₀)
+- Fracture aperture at injection point (w₀)
+
+## Summary Parameter Table
+
+| Parameter | Value | Units |
+|-----------|-------|-------|
+| Injection rate (Q₀) | 1.0 × 10⁻⁴ | m³/s |
+| Young's modulus (E) | 30 | GPa |
+| Poisson's ratio (ν) | 0.25 | dimensionless |
+| Fluid viscosity (μ) | 1.0 × 10⁻⁶ | Pa·s |
+| Rock toughness (K_Ic) | 1 | MPa·m^(1/2) |

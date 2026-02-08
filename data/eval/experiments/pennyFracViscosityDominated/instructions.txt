@@ -1,0 +1,128 @@
+# Natural Language Specification for Viscosity-Storage-Dominated Penny Shaped Hydraulic Fracture Simulation
+
+## Overview and Simulation Type
+
+This specification describes a hydraulic fracturing simulation for modeling the propagation of a radial (penny-shaped) hydraulic fracture in a viscosity-storage-dominated regime. This is a benchmark validation problem that simulates fracture growth from a point source, forming a circular fracture shape in an infinite, isotropic, homogeneous elastic domain. The simulation uses quarter-symmetry to reduce computational cost, so only one-fourth of the physical domain is explicitly modeled.
+
+## Solver Configuration
+
+### Primary Coupled Solver
+Create a Hydrofracture solver that couples three elementary solvers together. This main solver coordinates the interaction between fluid flow within the fracture, rock deformation, and fracture propagation.
+
+### Solid Mechanics Solver
+Configure a SolidMechanicsLagrangianFEM solver for modeling rock and fracture deformation. This solver must:
+- Target both the continuum region and the fracture region
+- Specify the contact constitutive behavior name for fracture contact mechanics
+
+### Flow Solver
+Configure a SinglePhaseFVM solver using the finite volume method for single-phase fluid flow inside the fracture.
+
+### Surface Generator Solver
+Configure a SurfaceGenerator solver with the following parameters:
+- Rock toughness value of 0.3e6 (in Pa times square root of meters, equivalent to 0.3 MPa times square root of meters)
+- Enable node-based Stress Intensity Factor (SIF) calculation by setting nodeBasedSIF to 1
+- This solver controls fracture propagation, creating new surfaces when the stress intensity factor exceeds local rock toughness
+
+## Mesh Specifications
+
+### Domain Dimensions
+Create a computational domain with dimensions 400 meters by 400 meters by 800 meters in the x, y, and z directions respectively.
+
+### Mesh Generation
+Use the internal mesh generator (InternalMesh) with the following specifications:
+- 80 elements in the x-direction
+- 80 elements in the y-direction  
+- 60 elements in the z-direction
+- Element type: C3D8 (eight-node hexahedral brick elements)
+- Cell block name: cb1
+
+### Mesh Refinement
+Apply local mesh refinement in the vicinity of the fracture plane to capture the detailed behavior near the propagating fracture.
+
+### Important Constraint
+The domain size in the z-direction (perpendicular to the fracture plane) must be at least ten times the expected final fracture radius to minimize boundary effects on the solution.
+
+### Fracture Plane Definition
+Define a nodeset that occupies a small region within the computational domain to represent the fracture plane. This is where the fracture will open and propagate upon fluid injection.
+
+## Constitutive Models and Material Properties
+
+### Rock Material
+Use the ElasticIsotropic constitutive model for the rock material with the following properties:
+- Bulk Modulus: 20.0 GPa
+- Shear Modulus: 12.0 GPa
+
+### Fluid Properties
+Use the CompressibleSinglePhaseFluid model for water with:
+- Viscosity: 1.0e-3 Pa.s (equivalent to 1.0 centipoise)
+- Zero compressibility (incompressible fluid)
+- This represents slickwater used in hydraulic fracturing
+
+### Contact Model
+Define a contact constitutive model for the fracture surfaces. The rock toughness of 0.3 MPa times square root of meters indicates low toughness, appropriate for viscosity-dominated fracture propagation.
+
+## Initial Conditions
+
+Initialize the following fields:
+- Water density: Set initial water density values in the domain
+- Separable face: Initialize the separable face field for fracture mechanics
+- Rupture state: Initialize the rupture state field for the propagating fracture
+
+## Boundary Conditions
+
+### Fluid Injection
+Apply a mass injection source flux (SourceFlux) at the surfaces of the initial fracture with:
+- Scale value of -6.625 (negative indicates injection into the domain)
+- This value represents one-quarter of the total injection (Q₀ times fluid density divided by 4) because only a quarter of the domain is modeled due to symmetry
+- The full injection rate Q₀ is 0.0265 cubic meters per second
+- Injection continues for 400 seconds
+
+### Mechanical Boundary Conditions
+Apply roller constraints (zero normal displacement with free tangential movement) on all outer boundaries of the domain.
+
+## Time History and Output Configuration
+
+### Data Collection Tasks
+Create PackCollection tasks to collect time history information from the fracture:
+- Pressure collection task for fluid pressure
+- Aperture collection task for element aperture
+- Hydraulic aperture collection task for hydraulic aperture values
+- Area collection task for element area
+
+All collection tasks should target the fracture element subregion, specified by the object path "ElementRegions/Fracture/FractureSubRegion".
+
+### Event Configuration
+Create a PeriodicEvent to trigger the PackCollection tasks at regular intervals during the simulation.
+
+### Output Format
+Configure output to write an HDF5 file named "pennyShapedViscosityDominated_output.hdf5" containing:
+- Simulation time
+- Fluid pressure
+- Element aperture
+- Hydraulic aperture
+- Element area
+
+## Numerical Method Notes
+
+- The simulation uses plane strain deformation assumptions
+- Fluid flow follows the lubrication equation derived from mass conservation and Poiseuille's law
+- Fracture propagation criterion uses node-based Stress Intensity Factor calculation
+- Fracture surfaces are impermeable (no fluid leak-off)
+- The model exploits quarter-symmetry, so injection rates and other applicable values should be divided by 4
+
+## Summary of Key Parameter Values
+
+| Parameter | Value | Units |
+|-----------|-------|-------|
+| Bulk Modulus | 20.0 | GPa |
+| Shear Modulus | 12.0 | GPa |
+| Rock Toughness | 0.3 | MPa·m^(1/2) |
+| Fluid Viscosity | 1.0e-3 | Pa·s |
+| Injection Rate (full) | 0.0265 | m³/s |
+| Injection Time | 400 | seconds |
+| Domain X dimension | 400 | meters |
+| Domain Y dimension | 400 | meters |
+| Domain Z dimension | 800 | meters |
+| Mesh elements X | 80 | - |
+| Mesh elements Y | 80 | - |
+| Mesh elements Z | 60 | - |

@@ -1,0 +1,82 @@
+# Natural Language Specification for Non-Linear Thermal Diffusion Wellbore Simulation
+
+## Simulation Overview
+
+Create an XML configuration file for a non-linear thermal diffusion simulation around a wellbore. This simulation models wellbore cooling during CO2 injection, where the single-phase thermal conductivity of the porous rock varies linearly with temperature. The problem uses a thermal single-phase flow solver and is set up as a 2D problem (based on the referenced base file naming convention).
+
+## Solver Configuration
+
+Configure a thermal single-phase flow solver capable of handling coupled heat transfer and fluid flow. The solver must support:
+- Non-linear thermal diffusion with temperature-dependent material properties
+- Single-phase flow physics
+- Thermal compressibility effects
+
+The simulation requires iterative solving due to the non-linear nature of the temperature-dependent thermal conductivity.
+
+## Mesh Requirements
+
+Create a 2D mesh representing the radial domain around a wellbore:
+- The geometry should be cylindrical/radial to represent the wellbore and surrounding formation
+- The mesh should extend from the wellbore wall outward into the formation
+- Use appropriate element types for 2D thermal diffusion (likely quadrilateral elements)
+- Mesh refinement should be concentrated near the wellbore where thermal gradients are steepest
+
+## Constitutive Models
+
+### Single Phase Thermal Conductivity
+
+This is the critical constitutive model for this simulation. Define a `SinglePhaseThermalConductivity` block with the following characteristics:
+
+- **Type**: Temperature-dependent (non-linear) thermal conductivity
+- **Reference thermal conductivity value**: Specify the base thermal conductivity of the porous medium at reference conditions
+- **Temperature derivative**: Define the derivative of thermal conductivity with respect to temperature (dK/dT), which creates the linear temperature dependence
+- The relationship follows: K(T) = K_ref + (dK/dT) × (T - T_ref)
+
+### Additional Material Properties
+
+Include constitutive models for:
+- Porous medium properties (porosity, permeability)
+- Fluid properties appropriate for CO2 or the injection fluid
+- Rock solid properties (density, specific heat capacity)
+- Thermal expansion coefficients if relevant
+
+## Initial Conditions
+
+Establish initial thermal and pressure conditions:
+- Initial temperature distribution in the formation (typically uniform far-field temperature)
+- Initial pressure distribution in the porous medium
+- Initial fluid saturation (single-phase, fully saturated)
+
+## Boundary Conditions
+
+### Wellbore Boundary (Inner Radius)
+- Apply a temperature boundary condition representing the cooling effect from CO2 injection
+- This may be a fixed temperature (Dirichlet) or heat flux condition at the wellbore wall
+
+### Outer Boundary (Far-Field)
+- Apply far-field temperature condition (typically constant, undisturbed formation temperature)
+- May use a large domain or appropriate boundary condition to represent infinite formation extent
+
+## Numerical Method Specifications
+
+- The solver should use methods appropriate for non-linear diffusion problems
+- Time integration scheme suitable for transient thermal problems
+- Non-linear iteration strategy to handle the temperature-dependent conductivity
+- Convergence tolerances for both the non-linear solver and linear solver sub-iterations
+- Time stepping that captures the thermal diffusion time scales
+
+## Output Requirements
+
+Configure output to capture:
+- Temperature field evolution over time
+- Temperature profiles as a function of radial distance from the wellbore
+- Results at specific time intervals for comparison with analytical/reference solutions (classical finite difference method results)
+- Data suitable for generating validation plots showing temperature vs. radial distance at various times
+
+## File Structure
+
+The configuration should be structured to potentially use:
+- A base XML file containing common parameters (mesh, general solver settings, most constitutive properties)
+- A benchmark-specific XML file that includes or overrides the specific temperature-dependent thermal conductivity parameters
+
+This modular approach allows the non-linear case to extend the linear thermal diffusion base case by primarily modifying the `Constitutive` section with the temperature-dependent `SinglePhaseThermalConductivity` definition.

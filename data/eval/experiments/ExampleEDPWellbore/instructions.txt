@@ -1,0 +1,157 @@
+# Natural Language Specification for Extended Drucker-Prager Wellbore Simulation
+
+## Overview and Simulation Type
+
+Create an XML configuration file for a three-dimensional drained wellbore elastoplastic deformation simulation using GEOS. This simulation models the contraction of a vertical wellbore subjected to in-situ stresses when the wellbore supporting pressure is reduced. The analysis uses the Extended Drucker-Prager constitutive model to capture elastoplastic behavior in the near-wellbore region. The simulation is quasi-static, meaning inertial effects are not considered.
+
+The configuration is split across two XML files: a base file containing solver, material, boundary conditions, and function definitions, and a benchmark file containing the mesh specification.
+
+---
+
+## Solver Configuration
+
+Define a solid mechanics solver using the Lagrangian finite element formulation with the following specifications:
+
+- **Solver type**: SolidMechanicsLagrangianFEM
+- **Solver name**: mechanicsSolver
+- **Problem type**: QuasiStatic (no inertial effects)
+- **Discretization method**: Reference a finite element discretization named "FE1" defined in the NumericalMethods section
+- **Material association**: The solver should reference a material named "rock"
+- **Target region**: The solver should operate on the cell block region created by the mesh
+
+---
+
+## Numerical Methods
+
+Define a finite element discretization in the NumericalMethods section:
+
+- **Discretization name**: FE1
+- This discretization will be used by the solid mechanics solver for spatial discretization of the governing equations
+
+---
+
+## Mesh Requirements
+
+Use the internal wellbore mesh generator to create a structured three-dimensional mesh:
+
+- **Mesh generator type**: InternalWellbore
+- **Domain dimensions**: 10 meters × 10 meters × 2 meters (representing the rock domain around the wellbore)
+- **Wellbore radius**: 0.1 meters (initial radius)
+- **Wellbore trajectory**: Define coordinates that represent a vertical well
+- **Radial element spacing**: Enable automatic spacing of radial elements using the autoSpaceRadialElems parameter set to 1, which will override manual nr (number of radial elements) values
+- **Element type**: Eight-node hexahedral elements (C3D8)
+- **Cell block name**: cb1
+- **Mesh refinement**: The mesh should be refined to conform with the wellbore geometry, with finer elements near the wellbore wall and coarser elements toward the far field
+
+---
+
+## Constitutive Model and Material Properties
+
+Define material properties in the Constitutive section using the Extended Drucker-Prager elastoplastic model:
+
+- **Constitutive model type**: ExtendedDruckerPrager
+- **Material name**: rock
+
+**Elastic properties:**
+- Bulk modulus (K): 500 MPa
+- Shear modulus (G): 300 MPa
+
+**Plastic properties (Mohr-Coulomb failure envelope parameters):**
+- Cohesion (defaultCohesion): 0.0 MPa (zero cohesion to match analytical reference)
+- Initial friction angle (defaultInitialFrictionAngle): 15.27 degrees
+- Residual friction angle (defaultResidualFrictionAngle): 23.05 degrees
+- Hardening rate (defaultHardening): 0.01 (dimensionless)
+- Dilation ratio (defaultDilationRatio): 1.0 (this corresponds to an associated plastic flow rule)
+
+**Additional properties:**
+- Density: Specify in SI units (the exact value should be defined based on typical rock properties)
+
+Note: Since the residual friction angle (23.05°) is larger than the initial friction angle (15.27°), this defines a strain hardening model.
+
+---
+
+## Initial Conditions
+
+All initial condition fields must have the initialCondition attribute set to 1 (true).
+
+**In-situ stress state:**
+- Isotropic horizontal stress (σh): -11.25 MPa (negative indicates compression per GEOS sign convention)
+- Vertical stress (σv): -15.0 MPa (negative indicates compression)
+
+**Initial wellbore wall traction:**
+- Apply an initial compressive traction of -11.25 MPa at the wellbore wall (surface named "rneg") at time t = 0 seconds to establish equilibrium with the in-situ horizontal stress
+
+---
+
+## Boundary Conditions
+
+Define boundary conditions in the FieldSpecifications section:
+
+**Wellbore wall loading (surface "rneg"):**
+- Apply traction with tractionType set to "normal"
+- Use scale value of 1.0
+- The traction is applied as a pressure specified from the product of scale and the outward face normal
+- Reference a time-dependent table function named "timeFunction" to control the loading magnitude
+- The wellbore pressure starts at -11.25 MPa and is linearly reduced to -2.0 MPa over the simulation time
+
+**Roller constraints:**
+- Apply roller constraints on boundaries "tneg" and "tpos"
+
+**Plane strain conditions:**
+- Fix vertical displacement (component 2, z-direction) on surfaces "zneg" and "zpos" to enforce plane strain conditions
+
+**Far-field boundary:**
+- Fix horizontal displacement on the far-field boundary to prevent rigid body motion
+
+**Object path specifications:**
+- Use "nodeManager" in objectPath for displacement boundary conditions applied to element nodes
+- Use "faceManager" in objectPath for traction boundary conditions applied to element faces
+
+**Component conventions:**
+- Component 0 = x-direction
+- Component 1 = y-direction  
+- Component 2 = z-direction
+
+---
+
+## Table Function for Time-Dependent Loading
+
+Define a table function in the Functions section:
+
+- **Function name**: timeFunction
+- **Function type**: TableFunction
+- **Purpose**: Define the time-dependent wellbore traction for the "ExternalLoad" boundary condition
+- **Coordinates**: Define time values as the independent variable
+- **Values**: Define corresponding traction magnitudes
+- **Loading history**: The loading magnitude should decrease linearly from the initial value (-11.25 MPa) to the final value (-2.0 MPa) as time progresses
+
+The coordinates and values together form time-magnitude pairs that describe the complete loading time history.
+
+---
+
+## Output Requirements
+
+Configure output to generate HDF5 format files for post-processing:
+
+- Enable HDF5 output for visualization and comparison with analytical solutions
+- Output should include displacement fields and stress fields around the wellbore
+- Results will be used to validate against analytical solutions from Chen and Abousleiman (2017)
+
+The output data should capture:
+- Principal stress component distributions
+- Stress path on the wellbore surface
+- Supporting wellbore pressure evolution
+- Wellbore size/deformation
+
+---
+
+## Additional Notes
+
+- All stress values use negative sign convention for compression (standard GEOS convention)
+- The shorthand location identifiers used for boundary condition application include:
+  - "rneg": wellbore wall (inner radius)
+  - "tneg" and "tpos": boundaries for roller constraints
+  - "zneg" and "zpos": top and bottom surfaces for plane strain
+  - "xpos", "ypos": far-field boundaries
+- The setName field in boundary conditions should reference the appropriate geometric regions defined by the mesh generator
+- The fieldName attribute should reference registered GEOS field names for displacement and stress components

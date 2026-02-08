@@ -1,0 +1,135 @@
+# Natural Language Specification for Cased Thermoelastic Wellbore Simulation
+
+## Overview and Simulation Type
+
+Create an XML configuration file for a cased thermoelastic wellbore simulation using GEOS. This simulation models a wellbore system consisting of three concentric cylindrical layers: a steel casing (innermost), a cement sheath (middle), and the surrounding rock formation (outermost). The problem involves thermal loading where a uniform temperature change is applied to the inner surface of the casing.
+
+The solver type should be **SinglePhasePoromechanics** with the thermal option enabled. This couples thermal diffusion with mechanical deformation. The simulation assumes isotropic linear thermoelastic behavior for all three materials. No separation or thermal barrier is permitted at the casing-cement and cement-rock contact interfaces. The problem is solved under plane strain conditions, meaning only radial thermal diffusion on a single horizontal layer is considered.
+
+## Mesh Requirements
+
+Use the **InternalWellbore** internal mesh generator to create the computational domain. Configure the mesh with the following specifications:
+
+1. **Radial geometry**: Define a vector of radii that specifies the boundaries of each cylindrical region - the inner casing radius, the outer casing radius (which equals the inner cement radius), the outer cement radius (which equals the inner rock formation radius), and the far-field outer boundary of the rock formation.
+
+2. **Angular extent**: Set the theta angle range from 0 to 90 degrees to simulate a quarter of the wellbore geometry, taking advantage of axisymmetric conditions.
+
+3. **Vertical trajectory**: Define a vertical well trajectory since only a single horizontal plane is being modeled under plane strain conditions.
+
+4. **Element sizing**: Enable the autoSpaceRadialElems parameter to automatically optimize element sizes, increasing them progressively from the wellbore toward the far-field zone. Apply this automatic spacing specifically to the rock formation layer only.
+
+5. **Outer boundary shape**: Set useCartesianOuterBoundary to a value of 3 for the rock layer, which transforms the far-field boundary into a circular shape.
+
+6. **Region definitions**: Define cellBlockNames to identify the three distinct regions (casing, cement sheath, and rock formation) with their associated element types specified in elementTypes.
+
+## Material Properties and Constitutive Models
+
+### Thermoelastic Solid Properties
+
+For each of the three materials (casing, cement, rock), define the following properties within the Constitutive section:
+
+1. **Elastic moduli**: Specify the drained bulk modulus and shear modulus for each material.
+
+2. **Thermal expansion**: Define the drained linear thermal expansion coefficient that relates stress change to temperature change.
+
+3. **Solid density**: Include solid density values for each material, though these will not affect results since gravitational effects are ignored in this simulation.
+
+### Poroelastic Properties
+
+Configure porosity and Biot coefficient settings to effectively simulate pure thermoelastic coupling without fluid flow effects:
+
+1. **Porosity**: Set a negligible (near-zero) porosity value for all three materials.
+
+2. **Biot coefficient**: Enforce a zero Biot coefficient by setting the elastic bulk modulus of the solid skeleton (Ks) equal to the drained bulk modulus (K), since the Biot coefficient is calculated as b = 1 - K/Ks.
+
+### Thermal Properties
+
+Define thermal transport properties for all three layers:
+
+1. **Thermal conductivity**: Specify conductivity values for casing, cement, and rock materials.
+
+2. **Volumetric heat capacity**: Define the solid volumetric heat capacity for each of the three materials.
+
+### Permeability Properties
+
+Assign ultra-low permeability values to all three layers (casing, cement, and rock) to effectively eliminate fluid flow and simulate a pure thermoelastic problem.
+
+### Fluid Properties
+
+Configure fluid properties to eliminate thermal convection effects:
+
+1. **Volumetric heat capacity**: Set a negligible volumetric heat capacity for the fluid to ensure that thermal transfer occurs only through diffusion, not convection.
+
+2. **Other fluid properties**: While viscosity and thermal expansion coefficient must be defined, their values are not critical since fluid flow is ignored and pore pressure remains zero throughout the simulation.
+
+## Initial Conditions
+
+### Initial Temperature
+
+Establish an initial reservoir temperature that serves as the reference temperature throughout the domain and at the far-field boundary.
+
+### Initial Stress State
+
+Configure initial effective stress for each layer (casing, cement, and rock) that is consistent with the initial temperature. The initial effective principal stress must be calculated according to the relationship: σ₀ = 3Kα·δT₀, where σ₀ is the initial effective principal stress, δT₀ is the initial temperature change from a reference state, K is the drained bulk modulus, and α is the drained linear thermal expansion coefficient of each respective material.
+
+### Initial Pore Pressure
+
+Set zero pore pressure throughout the entire domain to maintain the assumption of a thermoelastic problem without fluid flow consideration.
+
+## Boundary Conditions
+
+### Mechanical Boundary Conditions
+
+1. **Axisymmetric plane strain constraints**: Apply displacement boundary conditions on the appropriate surfaces to enforce axisymmetric plane strain conditions. This includes constraining normal displacements on the symmetry planes at theta equals 0 degrees and theta equals 90 degrees.
+
+2. **Far-field boundary fixity**: Constrain the far-field outer boundary to have zero displacement in all directions, based on the assumption that local changes near the wellbore have negligible effect on the distant boundary.
+
+3. **Inner casing surface traction**: Apply a traction-free (zero traction) boundary condition on the inner surface of the casing.
+
+### Thermal Boundary Conditions
+
+1. **Inner surface temperature**: Apply a specified temperature corresponding to a cold fluid on the inner surface of the casing. This temperature should be lower than the initial reservoir temperature to create the thermal loading.
+
+2. **Far-field temperature**: Maintain the initial reservoir temperature at the far-field boundary.
+
+### Hydraulic Boundary Conditions
+
+Enforce zero pore pressure conditions throughout the domain to ensure no fluid flow occurs during the simulation.
+
+## Solver Configuration
+
+Configure the SinglePhasePoromechanics solver with thermal coupling enabled. The solver should handle the coupled thermal diffusion and mechanical deformation problem. Since this is a validation study comparing against analytical solutions obtained using an implicit 1D finite difference method, ensure appropriate numerical parameters are selected for accuracy.
+
+## Output Requirements
+
+### Data Format
+
+Configure output in HDF5 format to facilitate post-processing with Python scripts.
+
+### Field Data Collection
+
+Set up data collection for the following fields across all time steps:
+
+1. **Temperature field**: Collect temperature data from all three layers (casing, cement, and rock formation).
+
+2. **Solid stress field**: Collect stress tensor components from all three material regions, particularly the radial and hoop (tangential) stress components for validation purposes.
+
+3. **Displacement field**: Collect displacement data for the entire domain using the nodeManager, which captures nodal displacement values.
+
+### Time History Output
+
+Configure time history outputs for:
+- Temperature evolution
+- Stress evolution  
+- Displacement evolution
+
+### Periodic Events
+
+Define periodic events to trigger the collection of field data at specified intervals throughout the simulation. This includes separate periodic events for displacement field collection and other output quantities. The events should capture data at time points suitable for comparison against the reference analytical solution.
+
+## File Organization
+
+The configuration should be organized potentially across multiple XML files:
+- A base XML file containing the core material properties, boundary conditions, and output definitions
+- A benchmark-specific XML file containing mesh parameters and any case-specific settings
+- The benchmark file should include the InternalWellbore mesh generator configuration with the specific geometric parameters
