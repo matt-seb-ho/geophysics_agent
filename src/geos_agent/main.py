@@ -63,7 +63,7 @@ def main():
     )
 
     if args.instruction is not None:
-        instruction = " ".join(args.instruction)
+        instruction = args.instruction  # Already a string, no need to join
         print(f"=== GEOS-Agent (workspace: {workspace_root}) ===")
         print(f"Instruction: {instruction}")
         print("--------------------------------------------------")
