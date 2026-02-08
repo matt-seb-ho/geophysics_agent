@@ -11,8 +11,7 @@ INPUT_DIR = DATA_DIR / "inputs"
 OUTPUT_DIR = DATA_DIR / "outputs"
 
 # Knowledge Base Paths
-# GEOS_SOURCE_DIR = DATA_DIR / "geos_source"  # Raw GEOS docs (RST/XML)
-GEOS_SOURCE_DIR = "/data/brianliu" # point to ad hoc data source (brianliu) 
+GEOS_SOURCE_DIR = DATA_DIR / "geos_source"  # Raw GEOS docs (RST/XML)
 CHUNKS_DIR = DATA_DIR / "chunks"            # Processed hierarchical chunks
 VECTOR_DB_DIR = DATA_DIR / "vector_db"      # ChromaDB storage
 NAV_GRAPH_PATH = DATA_DIR / "nav_graph.json"
