@@ -1,7 +1,21 @@
+import os
 from pathlib import Path
 
 # this file: repo/src/geos_agent/constants.py
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# Load environment variables from .env file first (before defining constants)
+# This ensures GEOSX_EXECUTABLE and other env vars are available
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_ROOT / ".env")
+except ImportError:
+    pass  # dotenv not installed, use environment variables as-is
+
+# The GEOS-X executable path should be set via GEOSX_EXECUTABLE environment variable
+# in your .env file.
+GEOSX_EXECUTABLE = Path(os.environ.get("GEOSX_EXECUTABLE", "/usr/local/bin/geosx"))
 
 # Central data directory
 DATA_DIR = PROJECT_ROOT / "data"
