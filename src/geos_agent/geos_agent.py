@@ -430,6 +430,10 @@ class GeosAgent:
             "simulation is ready",
             "created successfully",
             "has been written",
+            "successfully executed",
+            "simulation has been",
+            "results demonstrate",
+            "output shows",
         ]
 
         # Indicators of incomplete task (asking for more info)
@@ -479,8 +483,29 @@ class GeosAgent:
             indicators["errors_detected"] = error_count
             indicators["completion_score"] -= 0.2 * error_count
 
-        # Task is considered complete if score > 0.3
-        indicators["task_complete"] = indicators["completion_score"] > 0.3
+        # Check for GEOS simulation success indicators
+        # Look for evidence that simulation ran and produced outputs
+        simulation_success_indicators = [
+            "outputs/" in text_lower,  # Mentions output directory
+            ".txt" in text_lower or ".csv" in text_lower,  # Mentions output files
+            "simulation" in text_lower and ("run" in text_lower or "executed" in text_lower),
+            "geos" in text_lower and "success" in text_lower,
+        ]
+
+        simulation_success_count = sum(1 for indicator in simulation_success_indicators if indicator)
+        if simulation_success_count >= 2:
+            indicators["completion_score"] += 0.3
+            indicators["detected_phrases"].append("simulation_success: output file indicators found")
+
+        # Check if outputs directory was mentioned with specific files
+        if "outputs/" in text_lower and any(ext in text_lower for ext in [".txt", ".csv", ".hdf5", ".vtk"]):
+            indicators["completion_score"] += 0.2
+            indicators["detected_phrases"].append("completion: output files mentioned")
+
+        # Task is considered complete if score > 0.15 (lowered from 0.3)
+        # This allows a single completion phrase to succeed, but simulation
+        # success indicators can also push it over the threshold
+        indicators["task_complete"] = indicators["completion_score"] > 0.15
 
         return indicators
 
