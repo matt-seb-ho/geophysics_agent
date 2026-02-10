@@ -1,9 +1,0 @@
-# Time values for flow rate table (seconds)
-# Creates a trapezoidal flow rate profile
-0.0
-5.0
-10.0
-100.0
-300.0
-600.0
-1200.0
