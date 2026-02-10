@@ -28,7 +28,8 @@ OUTPUT_DIR = DATA_DIR / "outputs"
 PRIMER_PATH = PROJECT_ROOT / "GEOS_PRIMER.md"
 
 # Knowledge Base Paths
-GEOS_SOURCE_DIR = DATA_DIR / "geos_source"  # Raw GEOS docs (RST/XML)
+# GEOS_SOURCE_DIR = DATA_DIR / "geos_source"  # Raw GEOS docs (RST/XML)
+GEOS_SOURCE_DIR = Path("/data/brianliu/GEOS")
 CHUNKS_DIR = DATA_DIR / "chunks"            # Processed hierarchical chunks
 VECTOR_DB_DIR = DATA_DIR / "vector_db"      # ChromaDB storage
 NAV_GRAPH_PATH = DATA_DIR / "nav_graph.json"
