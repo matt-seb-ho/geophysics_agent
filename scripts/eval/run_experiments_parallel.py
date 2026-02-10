@@ -5,17 +5,23 @@ Run GEOS agent evaluation experiments concurrently (data parallel).
 This script runs multiple experiments in parallel, each with its own:
 - instructions.txt file
 - workspace directory
-- log file for stdout/stderr
+- stdout/stderr log file
+- optional JSONL conversation log file
 
 Usage:
     # Run with default concurrency (4 workers)
     uv run python scripts/eval/run_experiments_parallel.py
 
-    # Run with custom concurrency
-    uv run python scripts/eval/run_experiments_parallel.py --workers 8
+    # Run with custom concurrency and model
+    uv run python scripts/eval/run_experiments_parallel.py --workers 8 --model "anthropic/claude-3.5-sonnet"
 
-    # Run specific experiments
-    uv run python scripts/eval/run_experiments_parallel.py --experiments TutorialDeadOilEgg ExampleEDPWellbore
+    # Run specific experiments with JSONL logs
+    uv run python scripts/eval/run_experiments_parallel.py \
+        --experiments TutorialDeadOilEgg ExampleEDPWellbore \
+        --jsonl-log-dir data/eval/jsonl_logs
+
+    # Conservative run with fewer steps
+    uv run python scripts/eval/run_experiments_parallel.py --workers 2 --max-steps 50
 """
 
 import argparse
@@ -49,16 +55,28 @@ async def run_experiment(
     experiment_dir: Path,
     log_dir: Path,
     semaphore: asyncio.Semaphore,
-    experiment_name: str
+    experiment_name: str,
+    model: str,
+    max_steps: int,
+    max_retries: int,
+    retry_delay: float,
+    retry_backoff: float,
+    jsonl_log_dir: Path = None
 ) -> Tuple[str, bool, float]:
     """
     Run a single experiment and return results.
 
     Args:
         experiment_dir: Path to experiment directory
-        log_dir: Path to logs directory
+        log_dir: Path to logs directory (stdout/stderr)
         semaphore: Asyncio semaphore for concurrency control
         experiment_name: Name of the experiment
+        model: OpenRouter model name
+        max_steps: Maximum agent-tool iterations
+        max_retries: Maximum API retry attempts
+        retry_delay: Initial delay between retries
+        retry_backoff: Exponential backoff multiplier
+        jsonl_log_dir: Optional directory for JSONL conversation logs
 
     Returns:
         Tuple of (experiment_name, success, duration_seconds)
@@ -82,8 +100,18 @@ async def run_experiment(
         cmd = [
             "uv", "run", "geos-agent",
             "--instruction", instructions,
-            "--workspace", str(experiment_dir)
+            "--workspace", str(experiment_dir),
+            "--model", model,
+            "--max-steps", str(max_steps),
+            "--max-retries", str(max_retries),
+            "--retry-delay", str(retry_delay),
+            "--retry-backoff", str(retry_backoff),
         ]
+
+        # Add JSONL log path if specified
+        if jsonl_log_dir:
+            jsonl_log_file = jsonl_log_dir / f"{experiment_name}.jsonl"
+            cmd.extend(["--log", str(jsonl_log_file)])
 
         # Run experiment
         print(f"{Colors.OKCYAN}▶ Starting: {experiment_name}{Colors.ENDC}")
@@ -96,6 +124,8 @@ async def run_experiment(
                 f.write(f"Experiment: {experiment_name}\n")
                 f.write(f"Started: {datetime.now().isoformat()}\n")
                 f.write(f"Workspace: {experiment_dir}\n")
+                f.write(f"Model: {model}\n")
+                f.write(f"Max steps: {max_steps}\n")
                 f.write(f"Command: {' '.join(cmd)}\n")
                 f.write(f"{'='*80}\n\n")
                 f.flush()
@@ -146,6 +176,12 @@ async def run_all_experiments(
     experiments_dir: Path,
     log_dir: Path,
     max_workers: int,
+    model: str,
+    max_steps: int,
+    max_retries: int,
+    retry_delay: float,
+    retry_backoff: float,
+    jsonl_log_dir: Path = None,
     experiment_filter: List[str] = None
 ):
     """
@@ -153,8 +189,14 @@ async def run_all_experiments(
 
     Args:
         experiments_dir: Path to experiments directory
-        log_dir: Path to logs directory
+        log_dir: Path to logs directory (stdout/stderr)
         max_workers: Maximum number of concurrent experiments
+        model: OpenRouter model name
+        max_steps: Maximum agent-tool iterations
+        max_retries: Maximum API retry attempts
+        retry_delay: Initial delay between retries
+        retry_backoff: Exponential backoff multiplier
+        jsonl_log_dir: Optional directory for JSONL conversation logs
         experiment_filter: Optional list of experiment names to run
     """
     # Find all experiment directories
@@ -172,7 +214,11 @@ async def run_all_experiments(
     print(f"{Colors.BOLD}{Colors.HEADER}{'='*80}{Colors.ENDC}")
     print(f"Experiments: {len(experiment_dirs)}")
     print(f"Max workers: {max_workers}")
-    print(f"Log directory: {log_dir}")
+    print(f"Model: {model}")
+    print(f"Max steps: {max_steps}")
+    print(f"Stdout/stderr logs: {log_dir}")
+    if jsonl_log_dir:
+        print(f"JSONL conversation logs: {jsonl_log_dir}")
     print(f"{Colors.BOLD}{Colors.HEADER}{'='*80}{Colors.ENDC}\n")
 
     # Create semaphore for concurrency control
@@ -180,7 +226,11 @@ async def run_all_experiments(
 
     # Create tasks for all experiments
     tasks = [
-        run_experiment(exp_dir, log_dir, semaphore, exp_dir.name)
+        run_experiment(
+            exp_dir, log_dir, semaphore, exp_dir.name,
+            model, max_steps, max_retries, retry_delay, retry_backoff,
+            jsonl_log_dir
+        )
         for exp_dir in experiment_dirs
     ]
 
@@ -226,6 +276,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
+
+    # Parallelism settings
     parser.add_argument(
         "--workers",
         "-w",
@@ -233,6 +285,8 @@ def main():
         default=4,
         help="Number of concurrent workers (default: 4)"
     )
+
+    # Directory settings
     parser.add_argument(
         "--experiments-dir",
         type=Path,
@@ -243,13 +297,53 @@ def main():
         "--log-dir",
         type=Path,
         default=None,
-        help="Path to logs directory (default: data/eval/logs)"
+        help="Path to stdout/stderr logs directory (default: data/eval/logs)"
     )
+    parser.add_argument(
+        "--jsonl-log-dir",
+        type=Path,
+        default=None,
+        help="Path to JSONL conversation logs directory (default: none, no JSONL logs)"
+    )
+
+    # Experiment filtering
     parser.add_argument(
         "--experiments",
         "-e",
         nargs="+",
         help="Specific experiments to run (default: all)"
+    )
+
+    # Agent configuration (passed through to geos-agent)
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="moonshotai/kimi-k2.5",
+        help="OpenRouter model name (default: moonshotai/kimi-k2.5)"
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=100,
+        help="Maximum agent-tool iterations (default: 100)"
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=3,
+        help="Maximum API retry attempts (default: 3)"
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=1.0,
+        help="Initial delay between retries in seconds (default: 1.0)"
+    )
+    parser.add_argument(
+        "--retry-backoff",
+        type=float,
+        default=2.0,
+        help="Exponential backoff multiplier for retry delays (default: 2.0)"
     )
 
     args = parser.parse_args()
@@ -264,14 +358,22 @@ def main():
         print(f"{Colors.FAIL}Error: Experiments directory not found: {experiments_dir}{Colors.ENDC}")
         sys.exit(1)
 
-    # Create log directory
+    # Create log directories
     log_dir.mkdir(parents=True, exist_ok=True)
+    if args.jsonl_log_dir:
+        args.jsonl_log_dir.mkdir(parents=True, exist_ok=True)
 
     # Run experiments
     asyncio.run(run_all_experiments(
         experiments_dir=experiments_dir,
         log_dir=log_dir,
         max_workers=args.workers,
+        model=args.model,
+        max_steps=args.max_steps,
+        max_retries=args.max_retries,
+        retry_delay=args.retry_delay,
+        retry_backoff=args.retry_backoff,
+        jsonl_log_dir=args.jsonl_log_dir,
         experiment_filter=args.experiments
     ))
 
