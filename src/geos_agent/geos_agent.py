@@ -252,15 +252,16 @@ class GeosAgent:
             ]
 
         self.tool_map = {t.name: t for t in self.tools}
+        self.token_usage = {"input": 0, "output": 0}
 
     # ------------- logging -------------
 
     def _log(self, event: str, **kwargs: Any) -> None:
         # Legacy logging method kept for compatibility but no longer writes to file.
-        # Structured logging is now handled by get_conversation_log()
+        # Structured logging is now handled by _get_conversation_log()
         pass
 
-    def get_conversation_log(self) -> Dict[str, Any]:
+    def _get_conversation_log(self) -> Dict[str, Any]:
         """Generate a complete conversation log with user prompts, agent messages, and tool calls.
         
         Returns:
@@ -269,6 +270,7 @@ class GeosAgent:
             - messages: List of all conversation messages
             - tool_calls: List of all tool calls with details
             - summary: High-level statistics
+            - usage: Token usage statistics
         """
         user_prompt = None
         agent_messages = []
@@ -326,6 +328,11 @@ class GeosAgent:
             "tool_calls": tool_calls_list,
             "tool_responses": tool_responses,
             "summary": summary,
+            "usage": {
+                "total_input_tokens": self.token_usage["input"],
+                "total_output_tokens": self.token_usage["output"],
+                "total_tokens": self.token_usage["input"] + self.token_usage["output"]
+            },
             "all_messages": self.messages,
         }
 
@@ -334,7 +341,7 @@ class GeosAgent:
     def _get_tool_specs(self) -> List[Dict[str, Any]]:
         return [t.get_spec() for t in self.tools]
 
-    def _call_model_streaming(self) -> tuple[str, List[Any]]:
+    def _call_model_streaming(self) -> tuple[str, List[Any], Dict[str, int]]:
         """Call LLM with streaming. All API details handled by client."""
         return self.client.chat_completion_streaming(
             messages=self.messages,
@@ -438,7 +445,11 @@ class GeosAgent:
         for step_idx in range(1, self.config.max_steps + 1):
             self._log("step_start", step=step_idx)
 
-            assistant_text, tool_calls = self._call_model_streaming()
+            assistant_text, tool_calls, usage = self._call_model_streaming()
+
+            # Accumulate usage
+            self.token_usage["input"] += usage.get("prompt_tokens", 0)
+            self.token_usage["output"] += usage.get("completion_tokens", 0)
             last_assistant_text = assistant_text
 
             assistant_message: Dict[str, Any] = {

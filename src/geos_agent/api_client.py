@@ -248,7 +248,7 @@ class OpenRouterClient:
         max_tokens: int = 50000,
         reasoning: bool = True,
         tool_choice: str = "auto",
-    ) -> tuple[str, list]:
+    ) -> tuple[str, list, dict]:
         """
         Make a streaming chat completion call and parse the response.
 
@@ -257,6 +257,7 @@ class OpenRouterClient:
         - Streaming chunks to stdout in real-time
         - Accumulating tool calls across chunks
         - Retry logic for transient failures
+        - Handling reasoning/thinking content and usage statistics
 
         Args:
             messages: List of message dicts with 'role' and 'content'
@@ -268,8 +269,9 @@ class OpenRouterClient:
             tool_choice: Tool choice strategy ("auto", "none", or specific tool)
 
         Returns:
-            Tuple of (full_text_content, tool_calls_list)
+            Tuple of (full_text_content, tool_calls_list, usage_dict)
             where tool_calls_list contains objects with .id and .function attributes
+            and usage_dict contains prompt_tokens, completion_tokens, etc.
         """
 
         def _make_streaming_call():
@@ -285,6 +287,7 @@ class OpenRouterClient:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=True,
+                stream_options={"include_usage": True},
                 extra_body=extra_body if extra_body else None,
                 tool_choice=tool_choice,
             )
@@ -292,20 +295,50 @@ class OpenRouterClient:
             # Accumulate the response
             full_content = ""
             tool_calls_data: dict[int, dict[str, Any]] = {}  # index -> {id, name, arguments}
+            usage_data = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            
+            reasoning_active = False
 
             try:
                 for chunk in stream:
-                    delta = chunk.choices[0].delta if chunk.choices else None
+                    # Capture usage if present (usually in the last chunk)
+                    if chunk.usage:
+                        usage_data["prompt_tokens"] = chunk.usage.prompt_tokens
+                        usage_data["completion_tokens"] = chunk.usage.completion_tokens
+                        usage_data["total_tokens"] = chunk.usage.total_tokens
+
+                    if not chunk.choices:
+                        continue
+                    
+                    delta = chunk.choices[0].delta
                     if not delta:
                         continue
 
+                    # Handle reasoning content
+                    # Note: different providers might use different fields, trying standard approach
+                    # OpenRouter/Kimi might map it to 'reasoning' or 'reasoning_content'
+                    r_content = getattr(delta, "reasoning", None)
+                    if r_content:
+                        if not reasoning_active:
+                            print("<Thinking>", end="", flush=True)
+                            reasoning_active = True
+                        print(r_content, end="", flush=True)
+
                     # Handle text content
                     if delta.content:
+                        if reasoning_active:
+                            print("</Thinking>\n", end="", flush=True)
+                            reasoning_active = False
+                        
                         print(delta.content, end="", flush=True)
                         full_content += delta.content
 
                     # Handle tool calls (they come in chunks)
                     if delta.tool_calls:
+                        if reasoning_active:
+                            print("</Thinking>\n", end="", flush=True)
+                            reasoning_active = False
+
                         for tc in delta.tool_calls:
                             idx = tc.index
                             if idx not in tool_calls_data:
@@ -319,6 +352,7 @@ class OpenRouterClient:
                             if tc.function:
                                 if tc.function.name:
                                     tool_calls_data[idx]["name"] = tc.function.name
+                                # Handle partial arguments
                                 if tc.function.arguments:
                                     tool_calls_data[idx]["arguments"] += tc.function.arguments
             except Exception as e:
@@ -326,6 +360,9 @@ class OpenRouterClient:
                 if full_content:
                     print(f"\n[WARNING] Streaming interrupted: {e}", file=sys.stderr)
                 raise
+
+            if reasoning_active:
+                print("</Thinking>\n", end="", flush=True)
 
             # Convert accumulated tool calls to a list of simple objects
             tool_calls = []
@@ -352,7 +389,7 @@ class OpenRouterClient:
             if full_content:
                 print()  # Newline after streaming
 
-            return full_content, tool_calls
+            return full_content, tool_calls, usage_data
 
         # Wrap in retry logic
         return self.with_retry(_make_streaming_call, "streaming chat completion")

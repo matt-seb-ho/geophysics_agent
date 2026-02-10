@@ -99,7 +99,7 @@ def main():
             # Save conversation log to file ONLY if --log is provided
             if args.log:
                 import json
-                log_data = agent.get_conversation_log()
+                log_data = agent._get_conversation_log()
                 log_file = Path(args.log).resolve()
                 
                 with log_file.open("w", encoding="utf-8") as f:
@@ -116,7 +116,7 @@ def main():
             if args.log:
                 import json
                 try:
-                    log_data = agent.get_conversation_log()
+                    log_data = agent._get_conversation_log()
                     log_file = Path(args.log).resolve()
 
                     with log_file.open("w", encoding="utf-8") as f:
