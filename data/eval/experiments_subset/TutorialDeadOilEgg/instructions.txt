@@ -1,0 +1,184 @@
+# Natural Language Specification for Multiphase Flow with Wells Simulation (Egg Model)
+
+## 1. Simulation Type and Physical Problem
+
+This simulation models a three-dimensional multiphase water injection problem in a petroleum reservoir known as the Egg model. The problem involves deadoil compositional multiphase flow coupled with well operations. The model includes twelve wells: four producer wells and eight injector wells, positioned according to the original Egg model test case specifications. The reservoir mesh contains seven vertical layers through which the wells penetrate.
+
+## 2. Solver Configuration
+
+### Primary Coupling Solver
+Create a coupling solver of type **CompositionalMultiphaseReservoir** with the name "coupledFlowAndWells". This solver binds together the reservoir flow solver and well solver. Configure this solver with:
+- An attribute pointing to the flow solver name "compositionalMultiphaseFlow"
+- An attribute pointing to the well solver name "compositionalMultiphaseWell"
+- Target regions including both the reservoir region and all twelve well regions
+- Initial time step specification via an initialDt attribute
+
+### Nonlinear Solver Parameters (nested within coupling solver)
+- Maximum Newton iterations: 10
+- Time step increase iteration limit factor: 0.5 (meaning if convergence occurs in 5 or fewer iterations, double the time step)
+- Time step decrease iteration limit factor: 0.8 (meaning if convergence requires 8 or more iterations, reduce time step)
+- Time step cut factor: 0.1 (reduction factor when cutting time step)
+- Maximum time step cuts attribute must be specified
+- Line search action can optionally be set to "Attempt" or "Require"
+
+### Linear Solver Parameters
+Configure to use the Hypre linear solver package.
+
+### Reservoir Flow Solver
+Create a solver of type **CompositionalMultiphaseFVM** named "compositionalMultiphaseFlow". Set its target regions to the reservoir region only.
+
+### Well Solver
+Create a solver of type **CompositionalMultiphaseWell** named "compositionalMultiphaseWell". Set its target regions to all well regions. Set logLevel to 1 to receive notifications when well control switches occur (e.g., from rate control to BHP control).
+
+## 3. Mesh Requirements
+
+### Reservoir Mesh
+Create a **VTKMesh** block named "mesh" that imports the reservoir geometry from an external VTU file. The mesh file:
+- Contains the three-dimensional Egg model geometry
+- Includes permeability values in x, y, and z directions embedded as field data
+- All geometric quantities must be in metric units (meters for length, square meters for permeability)
+- Contains only active cells (no need to define inactive cells)
+- Results in 18553 hexahedral cells when imported
+
+### Well Definitions
+Define twelve wells using either **InternalWell** or **VTKWell** sub-blocks within the Mesh block:
+
+**Producer Wells (4 total):**
+- wellProducer1, wellProducer2, wellProducer3, wellProducer4
+
+**Injector Wells (8 total):**
+- wellInjector1, wellInjector2, wellInjector3, wellInjector4, wellInjector5, wellInjector6, wellInjector7, wellInjector8
+
+For each **InternalWell** sub-block:
+- Specify wellRegionName attribute pointing to the corresponding well region
+- Specify wellControl attribute pointing to the well's control definition
+- Define well trajectory as a vertical polyline passing through all seven layers of the mesh
+- Define perforations in each of the seven layers
+- Specify perforation locations using distanceFromHead attribute (linear distance along wellbore from well top)
+- Ensure a perforation exists in the bottom cell of the well mesh (required)
+- All geometric specifications must be in meters
+- Well transmissibility factors are calculated internally using Peaceman formulation
+
+For **VTKWell** sub-blocks (alternative approach):
+- Same attributes as InternalWell
+- Well trajectory loaded from external VTK polyline file
+- Same perforation and geometry requirements apply
+
+## 4. Element Regions
+
+### Reservoir Region
+Create a **CellElementRegion** named "reservoir":
+- Set cellBlocks to "{*}" (or "{hexahedra}" since mesh contains only hexahedral cells)
+- Include materialList attribute pointing to all constitutive models (fluid, relative permeability, rock permeability, rock porosity)
+
+### Well Regions
+Create twelve **WellElementRegion** blocks, one for each well:
+- wellRegion1 through wellRegion4 for producers
+- wellRegion5 through wellRegion12 for injectors
+- Each must include materialList attribute pointing to the same constitutive models as the reservoir
+
+## 5. Constitutive Models
+
+All parameters must use SI units.
+
+### Fluid Model
+Create a **DeadOilFluid** model describing the thermodynamic behavior of the fluid mixture. Include:
+- Phase names attribute defining the phases (the component indices 0 and 1 in initial conditions reference these phase names)
+
+### Relative Permeability Model
+Create an appropriate relative permeability model compatible with the dead oil formulation.
+
+### Rock Permeability Model
+Create a rock permeability model. Note that the permeability field values come from the imported VTK mesh file, but the model type must still be specified.
+
+### Rock Porosity Model
+Create a rock porosity model for defining the pore volume behavior.
+
+## 6. Initial and Boundary Conditions (Field Specifications)
+
+### Initial Pressure
+Create a field specification for initial pressure:
+- Apply to the reservoir region
+- Set as a uniform pressure field
+- Note: While this example uses uniform pressure (not hydrostatic equilibrium), hydrostatic initialization is possible using Function Manager
+
+### Initial Global Component Fractions
+Create field specifications for initial component fractions:
+- Define separate specifications for component 0 and component 1
+- The component attribute (0 or 1) corresponds to entries in the phaseNames attribute of the DeadOilFluid block
+- Apply to the reservoir region
+
+### Porosity Field
+Create a field specification for uniform porosity:
+- Required because porosity is not included in the imported mesh file
+- Apply to the reservoir region
+
+### Well Variables
+Well variables do not require initialization in Field Specifications as they are defined internally by the well solver.
+
+## 7. Numerical Methods
+
+Create a **FiniteVolume** numerical methods block specifying:
+- TPFA (Two-Point Flux Approximation) scheme for the flux discretization
+- Configure to match Egg model specifications
+
+## 8. Events
+
+### Solver Application Event
+Create a **PeriodicEvent** named "solverApplications":
+- Triggers the coupled solver "coupledFlowAndWells" at every time step
+- Applies to all target regions (reservoir and wells)
+
+### VTK Output Event
+Create a **PeriodicEvent** named "vtk":
+- Specify output frequency through timeFrequency attribute
+- Target the VTK output block named "vtkOutput"
+
+### Time History Collection Events
+Create four **PeriodicEvent** blocks for collecting well production rates:
+- One collection event per producer well (timeHistoryCollection1 through timeHistoryCollection4)
+- These trigger the corresponding PackCollection tasks
+
+### Time History Output Events
+Create four **PeriodicEvent** blocks for outputting HDF5 files:
+- timeHistoryOutput1 through timeHistoryOutput4
+- These trigger output of the collected time series data
+
+### Restart Event
+Create a **PeriodicEvent** named "restarts" for checkpoint/restart functionality.
+
+## 9. Outputs
+
+### VTK Output
+Create a **VTK** output block named "vtkOutput" for Paraview-compatible visualization files.
+
+### Time History Outputs
+Create four **TimeHistory** output blocks:
+- timeHistoryOutput1 through timeHistoryOutput4
+- Each corresponds to rate output for one producer well
+- Output format is HDF5
+
+### Restart Output
+Create a **Restart** output block named "restartOutput".
+
+## 10. Tasks
+
+### Pack Collection Tasks
+Create **PackCollection** tasks within the Tasks block for collecting well rates:
+- Define collection tasks for each of the four producer wells (wellRateCollection1 through wellRateCollection4)
+- Each task specifies:
+  - Object path pointing to the WellElementSubRegion of the corresponding well
+  - Field name: "wellElementMixtureConnectionRate"
+
+## Summary of Named Objects
+
+Ensure consistent naming throughout the XML file:
+- Coupling solver: "coupledFlowAndWells"
+- Flow solver: "compositionalMultiphaseFlow"  
+- Well solver: "compositionalMultiphaseWell"
+- Mesh: "mesh"
+- Reservoir region: "reservoir"
+- Well regions: "wellRegion1" through "wellRegion12"
+- VTK output: "vtkOutput"
+- Time history outputs: "timeHistoryOutput1" through "timeHistoryOutput4"
+- Collection tasks: "wellRateCollection1" through "wellRateCollection4"

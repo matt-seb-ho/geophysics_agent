@@ -1,7 +1,8 @@
+import sys
 from pathlib import Path
 
 from geos_agent.agent_config import AgentConfig
-from geos_agent.geos_agent import GeosAgent
+from geos_agent.geos_agent import AgentTerminationException, GeosAgent
 from geos_agent.tools.utils import build_default_tools
 
 # ==============================
@@ -45,8 +46,8 @@ def main():
     parser.add_argument(
         "--max-steps",
         type=int,
-        default=10,
-        help="Maximum agent-tool iterations.",
+        default=100,
+        help="Maximum agent-tool iterations (default: 100).",
     )
 
     args = parser.parse_args()
@@ -63,15 +64,31 @@ def main():
     )
 
     if args.instruction is not None:
-        instruction = " ".join(args.instruction)
+        instruction = args.instruction  # Already a string, no need to join
         print(f"=== GEOS-Agent (workspace: {workspace_root}) ===")
         print(f"Instruction: {instruction}")
         print("--------------------------------------------------")
 
-        agent.run(instruction)
+        try:
+            agent.run(instruction)
+        except AgentTerminationException as e:
+            print("\n" + "=" * 60, file=sys.stderr)
+            print("AGENT TERMINATION ERROR", file=sys.stderr)
+            print("=" * 60, file=sys.stderr)
+            print(str(e), file=sys.stderr)
+            print("=" * 60, file=sys.stderr)
+            sys.exit(1)
     else:
         print("GEOS-Agent interactive mode. Type 'exit' or 'quit' to exit.")
-        agent.interactive_cli()
+        try:
+            agent.interactive_cli()
+        except AgentTerminationException as e:
+            print("\n" + "=" * 60, file=sys.stderr)
+            print("AGENT TERMINATION ERROR", file=sys.stderr)
+            print("=" * 60, file=sys.stderr)
+            print(str(e), file=sys.stderr)
+            print("=" * 60, file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -164,21 +164,29 @@ class PythonExecTool(Tool):
                 text=True,
                 timeout=timeout_sec,
             )
-            return {
+            result = {
                 "script_path": os.path.relpath(tmp_path, self.workspace_root),
                 "returncode": proc.returncode,
                 "stdout": proc.stdout[-4000:],
                 "stderr": proc.stderr[-4000:],
             }
         except subprocess.TimeoutExpired as e:
-            return {
+            result = {
                 "script_path": os.path.relpath(tmp_path, self.workspace_root),
                 "error": f"Python execution timed out after {timeout_sec} seconds",
                 "stdout": e.stdout[-4000:] if e.stdout else "",
                 "stderr": e.stderr[-4000:] if e.stderr else "",
             }
         except Exception as e:
-            return {
+            result = {
                 "script_path": os.path.relpath(tmp_path, self.workspace_root),
                 "error": f"Failed to execute Python code: {e!r}",
             }
+        finally:
+            # Clean up the temporary file
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass  # File may already be deleted or not exist
+
+        return result

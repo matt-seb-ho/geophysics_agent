@@ -56,14 +56,21 @@ class WriteFileTool(Tool):
     name = "write_file"
     description = (
         "Write text to a file in the workspace. "
-        "Use this to create or modify GEOS input files, scripts, or configs."
+        "IMPORTANT: Files can ONLY be written to 'inputs/' or 'outputs/' directories. "
+        "Use 'inputs/' for GEOS XML input files and configuration files. "
+        "Use 'outputs/' for simulation results and output data. "
+        "Example: path='inputs/simulation.xml' or path='outputs/results.txt'"
     )
     parameters = {
         "type": "object",
         "properties": {
             "path": {
                 "type": "string",
-                "description": "Path to the file, relative to the workspace root.",
+                "description": (
+                    "Path to the file, relative to the workspace root. "
+                    "MUST start with 'inputs/' or 'outputs/'. "
+                    "Examples: 'inputs/simulation.xml', 'outputs/results.txt'"
+                ),
             },
             "content": {
                 "type": "string",
@@ -88,6 +95,20 @@ class WriteFileTool(Tool):
         abs_path = (self.workspace_root / path).resolve()
         if not str(abs_path).startswith(str(self.workspace_root)):
             return {"error": "Attempted to write outside of workspace."}
+
+        # Enforce that writes must go to inputs/ or outputs/ subdirectories
+        rel_path = Path(path)
+        path_parts = rel_path.parts
+        if len(path_parts) == 0:
+            return {"error": "Path cannot be empty."}
+
+        first_dir = path_parts[0]
+        if first_dir not in ("inputs", "outputs"):
+            return {
+                "error": f"Files can only be written to 'inputs/' or 'outputs/' directories. "
+                f"Path '{path}' starts with '{first_dir}/' which is not allowed. "
+                f"Use path='inputs/{path}' for input files or path='outputs/{path}' for output files."
+            }
 
         abs_path.parent.mkdir(parents=True, exist_ok=True)
         mode = "w" if overwrite or not abs_path.exists() else "a"

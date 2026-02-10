@@ -12,23 +12,22 @@ from .user_io import AskUser, ConfirmAction
 
 def build_default_tools(workspace_root: Path) -> List[Tool]:
     """Build the default set of tools for the agent.
-    
-    File and shell tools are restricted to the data/ subdirectory
-    to prevent the agent from modifying source code or other files.
+
+    File and shell tools are restricted to the workspace directory.
+    The agent should write files directly to inputs/ and outputs/ subdirectories.
     """
-    data_root = workspace_root / "data"
     return [
-        ReadFileTool(data_root),
-        WriteFileTool(data_root),
-        ListDirTool(data_root),
-        ShellCommandTool(data_root),
-        PythonExecTool(data_root),
+        ReadFileTool(workspace_root),
+        WriteFileTool(workspace_root),
+        ListDirTool(workspace_root),
+        ShellCommandTool(workspace_root),
+        PythonExecTool(workspace_root),
         # Dual-collection search tools
-        SearchNavigatorTool(),    # RST prose for navigation
-        SearchTechnicalTool(),    # XML syntax lookup
-        FetchCodeTool(),          # Lazy load code/XML
+        SearchNavigatorTool(),  # RST prose for navigation
+        SearchTechnicalTool(),  # XML syntax lookup
+        FetchCodeTool(),  # Lazy load code/XML
         SearchWebTool(),
-        RunGeosTool(data_root),
+        RunGeosTool(workspace_root),
         AskUser(),
         ConfirmAction(),
     ]

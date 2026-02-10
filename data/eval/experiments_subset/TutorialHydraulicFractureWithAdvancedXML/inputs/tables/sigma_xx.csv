@@ -1,0 +1,10 @@
+# Minimum horizontal stress values (Pa) for each layer
+# Layer-cake model with varying stress
+-40.0e6
+-42.0e6
+-45.0e6
+-48.0e6
+-50.0e6
+-48.0e6
+-45.0e6
+-42.0e6
