@@ -10,19 +10,23 @@ from typing import Any, Dict, Optional
 from .base import Tool
 
 
+from ..constants import GEOS_SOURCE_DIR
+
+
 class FetchCodeTool(Tool):
     name = "fetch_code"
     description = (
         "Read specific lines or sections from a code/XML file. "
         "Use this after search_geos_docs returns an xml_reference pointer. "
-        "Can read entire file or a specific line range."
+        "Can read entire file or a specific line range. "
+        "Relative paths are resolved against GEOS_SOURCE_DIR."
     )
     parameters = {
         "type": "object",
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "Absolute path to the file to read.",
+                "description": "Path to the file to read (absolute or relative to GEOS source).",
             },
             "start_line": {
                 "type": "integer",
@@ -62,6 +66,8 @@ class FetchCodeTool(Tool):
         """Fetch code from file with optional line/marker filtering."""
         
         path = Path(file_path)
+        if not path.is_absolute():
+            path = GEOS_SOURCE_DIR / path
         
         if not path.exists():
             return {"error": f"File not found: {file_path}"}
