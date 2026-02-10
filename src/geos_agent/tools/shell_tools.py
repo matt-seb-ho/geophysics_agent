@@ -1,5 +1,6 @@
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -171,8 +172,20 @@ class PythonExecTool(Tool):
             tmp_path = f.name
 
         try:
+            # Check if we should use 'uv run'
+            # We use it if 'uv' is installed AND we are in a project root (has pyproject.toml)
+            # This ensures imported dependencies work.
+            use_uv = False
+            if (self.workspace_root / "pyproject.toml").exists() and shutil.which("uv"):
+                use_uv = True
+
+            if use_uv:
+                cmd = ["uv", "run", "python", tmp_path]
+            else:
+                cmd = [sys.executable, tmp_path]
+
             proc = subprocess.run(
-                [sys.executable, tmp_path],
+                cmd,
                 cwd=str(self.workspace_root),
                 capture_output=True,
                 text=True,
