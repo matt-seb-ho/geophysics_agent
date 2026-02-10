@@ -36,7 +36,7 @@ for experiment_dir in "$EXPERIMENTS_DIR"/*; do
         echo "Workspace: $experiment_dir"
         
         # Use command substitution with proper quoting
-        uv run geos-agent --instruction "$(cat "$instructions_file")" --workspace "$experiment_dir"
+        uv run geos-agent --instruction "$(cat "$instructions_file")" --workspace "$experiment_dir" --log "$experiment_dir/log.json"
         
         echo "Completed: $experiment_name"
         echo ""

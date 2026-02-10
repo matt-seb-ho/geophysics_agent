@@ -152,7 +152,6 @@ class GeosAgent:
         workspace_root: Path,
         tools: List[Tool],
         config: Optional[AgentConfig] = None,
-        log_path: Optional[Path] = None,
     ):
         self.workspace_root = Path(workspace_root).resolve()
 
@@ -210,20 +209,13 @@ class GeosAgent:
             ]
 
         self.tool_map = {t.name: t for t in self.tools}
-        self.log_path = log_path
 
     # ------------- logging -------------
 
     def _log(self, event: str, **kwargs: Any) -> None:
-        if not self.log_path:
-            return
-        record = {"event": event, **kwargs}
-        try:
-            with self.log_path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        except Exception:
-            # Logging should never crash the agent
-            pass
+        # Legacy logging method kept for compatibility but no longer writes to file.
+        # Structured logging is now handled by get_conversation_log()
+        pass
 
     def get_conversation_log(self) -> Dict[str, Any]:
         """Generate a complete conversation log with user prompts, agent messages, and tool calls.

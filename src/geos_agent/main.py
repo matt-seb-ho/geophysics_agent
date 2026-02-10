@@ -35,7 +35,7 @@ def main():
         "--log",
         type=str,
         default=None,
-        help="Optional JSONL log file path.",
+        help="Optional path to save the structured conversation log (JSON).",
     )
     parser.add_argument(
         "--model",
@@ -70,7 +70,7 @@ def main():
 
     args = parser.parse_args()
     workspace_root = Path(args.workspace).resolve()
-    log_path = Path(args.log) if args.log else None
+    # log_path = Path(args.log) if args.log else None  # Handled at end of run
 
     tools = build_default_tools(workspace_root)
     config = AgentConfig(
@@ -84,7 +84,7 @@ def main():
         workspace_root=workspace_root,
         tools=tools,
         config=config,
-        log_path=log_path,
+        # log_path=log_path,  # Deprecated
     )
 
     if args.instruction is not None:
@@ -96,13 +96,15 @@ def main():
         try:
             agent.run(instruction)
             
-            # Save conversation log to log.json
-            import json
-            log_data = agent.get_conversation_log()
-            log_file = workspace_root / "log.json"
-            with log_file.open("w", encoding="utf-8") as f:
-                json.dump(log_data, f, indent=2, ensure_ascii=False)
-            print(f"\nConversation log saved to: {log_file}")
+            # Save conversation log to file ONLY if --log is provided
+            if args.log:
+                import json
+                log_data = agent.get_conversation_log()
+                log_file = Path(args.log).resolve()
+                
+                with log_file.open("w", encoding="utf-8") as f:
+                    json.dump(log_data, f, indent=2, ensure_ascii=False)
+                print(f"\nConversation log saved to: {log_file}")
             
         except AgentTerminationException as e:
             print("\n" + "=" * 60, file=sys.stderr)
@@ -111,16 +113,17 @@ def main():
             print(str(e), file=sys.stderr)
             print("=" * 60, file=sys.stderr)
             
-            # Save conversation log even on error
-            import json
-            try:
-                log_data = agent.get_conversation_log()
-                log_file = workspace_root / "log.json"
-                with log_file.open("w", encoding="utf-8") as f:
-                    json.dump(log_data, f, indent=2, ensure_ascii=False)
-                print(f"\nConversation log saved to: {log_file}", file=sys.stderr)
-            except Exception as log_error:
-                print(f"Failed to save conversation log: {log_error}", file=sys.stderr)
+            if args.log:
+                import json
+                try:
+                    log_data = agent.get_conversation_log()
+                    log_file = Path(args.log).resolve()
+
+                    with log_file.open("w", encoding="utf-8") as f:
+                        json.dump(log_data, f, indent=2, ensure_ascii=False)
+                    print(f"\nConversation log saved to: {log_file}", file=sys.stderr)
+                except Exception as log_error:
+                    print(f"Failed to save conversation log: {log_error}", file=sys.stderr)
             
             sys.exit(1)
     else:
