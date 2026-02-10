@@ -328,7 +328,6 @@ class GeosAgent:
             "tool_responses": tool_responses,
             "summary": summary,
             "usage": self.client.get_token_usage(),
-            "all_messages": self.messages,
         }
 
     # ------------- tool plumbing -------------
