@@ -3,8 +3,9 @@ name = "geophysics_agent"
 version = "0.1.0"
 dependencies = [
     "chromadb>=1.4.0",
+    "matplotlib>=3.10.8",
     "openai>=2.14.0",
- "python-dotenv",
+    "python-dotenv",
 ]
 
 [project.scripts]

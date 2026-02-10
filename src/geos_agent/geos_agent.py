@@ -54,6 +54,9 @@ ALWAYS generate Python visualization scripts alongside input files when applicab
   • Follow GEOS conventions: use `matplotlib` for static plots, provide save/show options
   • Reference the hydrofracture example pattern: queries script for data extraction, \
     figure script for publication-quality plots
+  • **CRITICAL**: Scripts MUST ONLY write files to the `outputs/` directory. Hardcode all \
+    output paths (figures, data exports, logs) to use `outputs/` or subdirectories within \
+    it. NEVER write to workspace root, inputs/, or system directories.
 
 
 WORKFLOW DISCIPLINE:
@@ -78,12 +81,15 @@ EXECUTION REQUIREMENTS:
   • After creating XML in inputs/, ALWAYS run the simulation using run_geos tool
   • If simulation fails, analyze errors and fix XML
   • Re-run until success or outputs are generated
+  • After successful simulation, move ALL output files from workspace root to `outputs/` \
+    directory using shell commands (e.g., `mv *.hdf5 outputs/; mv *.txt outputs/`)
   • Check outputs/ directory for results
 
 
 POST-PROCESSING REQUIREMENTS:
   • After successful simulation, run or provide visualization scripts
-  • Generated plots should be saved to `outputs/` directory
+  • Generated plots MUST be saved to `outputs/` directory (hardcoded paths in scripts)
+  • Visualization scripts MUST NOT produce files outside the workspace's outputs/ folder
   • Summarize key results (fracture dimensions, pressures, etc.) in your response
 
 
@@ -103,6 +109,7 @@ TOOLS AVAILABLE:
   • GEOS execution: run simulations with run_geos tool
 {mode_specific}
 {primer}"""
+
 
 
 MODE_INTERACTIVE = """
