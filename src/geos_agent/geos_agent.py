@@ -225,6 +225,75 @@ class GeosAgent:
             # Logging should never crash the agent
             pass
 
+    def get_conversation_log(self) -> Dict[str, Any]:
+        """Generate a complete conversation log with user prompts, agent messages, and tool calls.
+        
+        Returns:
+            Dictionary containing:
+            - user_prompt: The initial user instruction
+            - messages: List of all conversation messages
+            - tool_calls: List of all tool calls with details
+            - summary: High-level statistics
+        """
+        user_prompt = None
+        agent_messages = []
+        tool_calls_list = []
+        tool_responses = []
+        
+        # Extract information from messages
+        for msg in self.messages:
+            role = msg.get("role")
+            
+            if role == "user":
+                # Capture the user's prompt (typically the first user message)
+                if user_prompt is None:
+                    user_prompt = msg.get("content", "")
+            
+            elif role == "assistant":
+                # Capture assistant messages and their tool calls
+                agent_message = {
+                    "content": msg.get("content", ""),
+                    "tool_calls": []
+                }
+                
+                # Extract tool calls if present
+                if "tool_calls" in msg:
+                    for tc in msg["tool_calls"]:
+                        tool_call_info = {
+                            "id": tc.get("id"),
+                            "tool_name": tc.get("function", {}).get("name"),
+                            "arguments": tc.get("function", {}).get("arguments"),
+                        }
+                        agent_message["tool_calls"].append(tool_call_info)
+                        tool_calls_list.append(tool_call_info)
+                
+                agent_messages.append(agent_message)
+            
+            elif role == "tool":
+                # Capture tool responses
+                tool_responses.append({
+                    "tool_call_id": msg.get("tool_call_id"),
+                    "content": msg.get("content", "")
+                })
+        
+        # Build summary statistics
+        summary = {
+            "total_agent_messages": len(agent_messages),
+            "total_tool_calls": len(tool_calls_list),
+            "unique_tools_used": len(set(
+                tc["tool_name"] for tc in tool_calls_list if tc["tool_name"]
+            )),
+        }
+        
+        return {
+            "user_prompt": user_prompt,
+            "agent_messages": agent_messages,
+            "tool_calls": tool_calls_list,
+            "tool_responses": tool_responses,
+            "summary": summary,
+            "all_messages": self.messages,
+        }
+
     # ------------- tool plumbing -------------
 
     def _get_tool_specs(self) -> List[Dict[str, Any]]:

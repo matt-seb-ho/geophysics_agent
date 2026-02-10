@@ -95,12 +95,33 @@ def main():
 
         try:
             agent.run(instruction)
+            
+            # Save conversation log to log.json
+            import json
+            log_data = agent.get_conversation_log()
+            log_file = workspace_root / "log.json"
+            with log_file.open("w", encoding="utf-8") as f:
+                json.dump(log_data, f, indent=2, ensure_ascii=False)
+            print(f"\nConversation log saved to: {log_file}")
+            
         except AgentTerminationException as e:
             print("\n" + "=" * 60, file=sys.stderr)
             print("AGENT TERMINATION ERROR", file=sys.stderr)
             print("=" * 60, file=sys.stderr)
             print(str(e), file=sys.stderr)
             print("=" * 60, file=sys.stderr)
+            
+            # Save conversation log even on error
+            import json
+            try:
+                log_data = agent.get_conversation_log()
+                log_file = workspace_root / "log.json"
+                with log_file.open("w", encoding="utf-8") as f:
+                    json.dump(log_data, f, indent=2, ensure_ascii=False)
+                print(f"\nConversation log saved to: {log_file}", file=sys.stderr)
+            except Exception as log_error:
+                print(f"Failed to save conversation log: {log_error}", file=sys.stderr)
+            
             sys.exit(1)
     else:
         print("GEOS-Agent interactive mode. Type 'exit' or 'quit' to exit.")
