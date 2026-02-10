@@ -33,6 +33,9 @@ class ListDirTool(Tool):
     def __init__(self, workspace_root: Path):
         self.workspace_root = Path(workspace_root).resolve()
 
+    def format_execution_summary(self, path: str = ".", **kwargs) -> str:
+        return f"listing directory '{path}'"
+
     def run(self, path: str = ".") -> Dict[str, Any]:
         abs_dir = (self.workspace_root / path).resolve()
         if not str(abs_dir).startswith(str(self.workspace_root)):
@@ -82,6 +85,13 @@ class ShellCommandTool(Tool):
 
     def __init__(self, workspace_root: Path):
         self.workspace_root = Path(workspace_root).resolve()
+
+    def format_execution_summary(self, command: str, timeout_sec: float = 60.0, **kwargs) -> str:
+        # Truncate long commands
+        cmd_display = command[:80] + "..." if len(command) > 80 else command
+        if timeout_sec != 60.0:
+            return f"executing '{cmd_display}' (timeout: {timeout_sec}s)"
+        return f"executing '{cmd_display}'"
 
     def run(self, command: str, timeout_sec: float = 60.0) -> Dict[str, Any]:
         try:
@@ -142,6 +152,10 @@ class PythonExecTool(Tool):
 
     def __init__(self, workspace_root: Path):
         self.workspace_root = Path(workspace_root).resolve()
+
+    def format_execution_summary(self, code: str, timeout_sec: float = 30.0, **kwargs) -> str:
+        lines = code.count('\n') + 1 if code else 0
+        return f"executing {lines} lines of Python"
 
     def run(self, code: str, timeout_sec: float = 30.0) -> Dict[str, Any]:
         # Write code to a temporary file in the workspace

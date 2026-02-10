@@ -50,6 +50,44 @@ Run the agent with your natural language instruction:
 uv run geos-agent "Create a simulation for multiphase flow in a porous medium"
 ```
 
+### Configuration Options
+
+The agent supports various configuration options through the `AgentConfig` class:
+
+```bash
+# Example with custom retry settings
+uv run geos-agent \
+  --instruction "Your instruction" \
+  --model "moonshotai/kimi-k2.5" \
+  --max-steps 100 \
+  --workspace . \
+  --log logs/run.jsonl
+```
+
+**API Retry Configuration** (new in this version):
+
+The agent now includes robust error handling with configurable retry logic for API failures:
+
+- `max_retries` (default: 3) - Maximum number of retry attempts for API calls
+- `retry_delay` (default: 1.0) - Initial delay between retries in seconds
+- `retry_backoff` (default: 2.0) - Exponential backoff multiplier for retry delays
+- `retry_on_timeout` (default: True) - Retry on timeout errors
+- `retry_on_rate_limit` (default: True) - Retry on rate limit errors (HTTP 429)
+- `retry_on_server_error` (default: True) - Retry on server errors (HTTP 5xx)
+
+These settings help ensure the agent can recover from transient API failures without crashing. Configure them programmatically:
+
+```python
+from geos_agent.agent_config import AgentConfig
+
+config = AgentConfig(
+    model="moonshotai/kimi-k2.5",
+    max_retries=5,
+    retry_delay=2.0,
+    retry_backoff=2.5
+)
+```
+
 ## Project Structure
 
 ```

@@ -30,6 +30,10 @@ class AskUser(Tool):
             },
         }
 
+    def format_execution_summary(self, question: str, **kwargs) -> str:
+        question_preview = question[:60] + "..." if len(question) > 60 else question
+        return f"asking: '{question_preview}'"
+
     def run(
         self,
         question: str,
@@ -95,6 +99,10 @@ class ConfirmAction(Tool):
                 },
             },
         }
+
+    def format_execution_summary(self, summary: str, **kwargs) -> str:
+        summary_preview = summary[:60] + "..." if len(summary) > 60 else summary
+        return f"confirming: '{summary_preview}'"
 
     def run(
         self, summary: str, details: str = "", default: str = "deny"

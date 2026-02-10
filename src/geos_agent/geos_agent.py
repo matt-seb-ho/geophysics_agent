@@ -4,9 +4,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
-
 from geos_agent.agent_config import AgentConfig
+from geos_agent.api_client import OpenRouterClient, RetryConfig
 from geos_agent.tools.base import Tool
 
 # ==============================
@@ -78,10 +77,19 @@ class GeosAgent:
     ):
         self.workspace_root = Path(workspace_root).resolve()
 
-        # Initialize OpenAI client with OpenRouter base URL
-        self.client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
+        # Initialize OpenRouter client with retry configuration
+        retry_config = RetryConfig(
+            max_retries=config.max_retries if config else 3,
+            retry_delay=config.retry_delay if config else 1.0,
+            retry_backoff=config.retry_backoff if config else 2.0,
+            retry_on_timeout=config.retry_on_timeout if config else True,
+            retry_on_rate_limit=config.retry_on_rate_limit if config else True,
+            retry_on_server_error=config.retry_on_server_error if config else True,
+        )
+        self.client = OpenRouterClient(
             api_key=os.environ.get("OPENROUTER_API_KEY"),
+            retry_config=retry_config,
+            log_callback=self._log,
         )
         self.config = config or AgentConfig()
         self.config.mode = (self.config.mode or "auto").lower()
@@ -164,84 +172,17 @@ class GeosAgent:
         return [t.get_spec() for t in self.tools]
 
     def _call_model_streaming(self) -> tuple[str, List[Any]]:
-        """Call OpenRouter Chat Completions API with streaming."""
-        # Build extra body for reasoning models
-        extra_body = {}
-        if self.config.reasoning:
-            extra_body["reasoning"] = {"enabled": True}
-
-        stream = self.client.chat.completions.create(
-            model=self.config.model,
+        """Call LLM with streaming. All API details handled by client."""
+        return self.client.chat_completion_streaming(
             messages=self.messages,
             tools=self._get_tool_specs(),
+            model=self.config.model,
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
-            stream=True,
-            extra_body=extra_body if extra_body else None,
+            reasoning=self.config.reasoning,
             tool_choice="auto",
         )
 
-        # Accumulate the response
-        full_content = ""
-        tool_calls_data: Dict[
-            int, Dict[str, Any]
-        ] = {}  # index -> {id, name, arguments}
-
-        for chunk in stream:
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if not delta:
-                continue
-
-            # Handle text content
-            if delta.content:
-                print(delta.content, end="", flush=True)
-                full_content += delta.content
-
-            # Handle tool calls (they come in chunks)
-            if delta.tool_calls:
-                for tc in delta.tool_calls:
-                    idx = tc.index
-                    if idx not in tool_calls_data:
-                        tool_calls_data[idx] = {
-                            "id": "",
-                            "name": "",
-                            "arguments": "",
-                        }
-                    if tc.id:
-                        tool_calls_data[idx]["id"] = tc.id
-                    if tc.function:
-                        if tc.function.name:
-                            tool_calls_data[idx]["name"] = tc.function.name
-                        if tc.function.arguments:
-                            tool_calls_data[idx]["arguments"] += tc.function.arguments
-
-        # Convert accumulated tool calls to a list
-        tool_calls = []
-        for idx in sorted(tool_calls_data.keys()):
-            tc_data = tool_calls_data[idx]
-            # Create a simple object-like structure
-            tool_calls.append(
-                type(
-                    "ToolCall",
-                    (),
-                    {
-                        "id": tc_data["id"],
-                        "function": type(
-                            "Function",
-                            (),
-                            {
-                                "name": tc_data["name"],
-                                "arguments": tc_data["arguments"],
-                            },
-                        )(),
-                    },
-                )()
-            )
-
-        if full_content:
-            print()  # Newline after streaming
-
-        return full_content, tool_calls
 
     def _run_tool_call(self, tool_call) -> Dict[str, Any]:
         """Execute a tool call and return a tool message."""
@@ -274,7 +215,9 @@ class GeosAgent:
                 "content": result_str,
             }
 
-        print(f"[Running tool: {name}]", file=sys.stderr)
+        # Get descriptive summary from the tool itself
+        args_summary = tool.format_execution_summary(**args)
+        print(f"\n🔧 {name}: {args_summary}", file=sys.stderr, flush=True)
 
         try:
             output_obj = tool.run(**args)

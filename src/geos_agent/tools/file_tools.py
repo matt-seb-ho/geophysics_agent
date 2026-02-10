@@ -36,6 +36,11 @@ class ReadFileTool(Tool):
     def __init__(self, workspace_root: Path):
         self.workspace_root = Path(workspace_root).resolve()
 
+    def format_execution_summary(self, path: str, max_chars: int = 4000, **kwargs) -> str:
+        if max_chars != 4000:
+            return f"reading '{path}' (max {max_chars} chars)"
+        return f"reading '{path}'"
+
     def run(self, path: str, max_chars: int = 4000) -> Dict[str, Any]:
         abs_path = (self.workspace_root / path).resolve()
         if not str(abs_path).startswith(str(self.workspace_root)):
@@ -90,6 +95,11 @@ class WriteFileTool(Tool):
 
     def __init__(self, workspace_root: Path):
         self.workspace_root = Path(workspace_root).resolve()
+
+    def format_execution_summary(self, path: str, content: str, overwrite: bool = True, **kwargs) -> str:
+        size = len(content) if isinstance(content, str) else 0
+        mode = "overwriting" if overwrite else "appending to"
+        return f"{mode} '{path}' ({size} chars)"
 
     def run(self, path: str, content: str, overwrite: bool = True) -> Dict[str, Any]:
         abs_path = (self.workspace_root / path).resolve()

@@ -44,6 +44,13 @@ class FetchCodeTool(Tool):
         "required": ["file_path"],
     }
 
+    def format_execution_summary(self, file_path: str, start_line: Optional[int] = None, end_line: Optional[int] = None, **kwargs) -> str:
+        path = Path(file_path)
+        if start_line is not None or end_line is not None:
+            line_info = f"L{start_line or 1}-L{end_line or 'end'}"
+            return f"fetching code from '{path.name}' ({line_info})"
+        return f"fetching code from '{path.name}'"
+
     def run(
         self,
         file_path: str,

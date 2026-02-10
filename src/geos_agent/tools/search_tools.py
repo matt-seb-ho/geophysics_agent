@@ -70,6 +70,9 @@ class SearchNavigatorTool(Tool):
             embedding_function=self.embedding_fn,
         )
 
+    def format_execution_summary(self, query: str, n_results: int = 5, **kwargs) -> str:
+        return f"searching documentation for '{query}' (top {n_results} results)"
+
     def run(self, query: str, n_results: int = 5) -> Dict[str, Any]:
         try:
             results = self.collection.query(
@@ -130,6 +133,9 @@ class SearchTechnicalTool(Tool):
             embedding_function=self.embedding_fn,
         )
 
+    def format_execution_summary(self, query: str, n_results: int = 5, **kwargs) -> str:
+        return f"searching XML/code for '{query}' (top {n_results} results)"
+
     def run(self, query: str, n_results: int = 5) -> Dict[str, Any]:
         try:
             results = self.collection.query(
@@ -182,6 +188,9 @@ class SearchGeosDocsTool(Tool):
         self.navigator = SearchNavigatorTool()
         self.technical = SearchTechnicalTool()
 
+    def format_execution_summary(self, query: str, **kwargs) -> str:
+        return f"searching GEOS docs for '{query}' (combined search)"
+
     def run(self, query: str) -> Dict[str, Any]:
         nav_results = self.navigator.run(query, n_results=2)
         tech_results = self.technical.run(query, n_results=2)
@@ -209,6 +218,9 @@ class SearchWebTool(Tool):
         },
         "required": ["query"],
     }
+
+    def format_execution_summary(self, query: str, **kwargs) -> str:
+        return f"web searching for '{query}'"
 
     def run(self, query: str) -> Dict[str, Any]:
         # TODO

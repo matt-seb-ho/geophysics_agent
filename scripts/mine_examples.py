@@ -5,8 +5,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from openai import OpenAI
 from dotenv import load_dotenv
+
+# Import the retry-enabled client
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from geos_agent.api_client import OpenRouterClient, RetryConfig
 
 load_dotenv()
 
@@ -189,9 +193,15 @@ def generate_spec_with_llm(rst_content: str, example_id: str) -> str:
     Use Claude opus-4.5 thinking via OpenRouter to generate a comprehensive
     natural language specification from the full RST documentation.
     """
-    client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
+    # Use retry-enabled client with reasonable defaults for batch processing
+    retry_config = RetryConfig(
+        max_retries=5,  # More retries for batch processing
+        retry_delay=2.0,  # Slightly longer initial delay
+        retry_backoff=2.0,
+    )
+    client = OpenRouterClient(
         api_key=os.environ.get("OPENROUTER_API_KEY"),
+        retry_config=retry_config,
     )
 
     prompt = f"""You are analyzing GEOS geophysics simulation documentation. Given the following RST documentation for an example, generate a comprehensive natural language specification that describes what XML configuration file a user would need to create.
@@ -216,14 +226,16 @@ RST Documentation:
 
 Generate the natural language specification:"""
 
-    response = client.chat.completions.create(
-        model="anthropic/claude-opus-4.5",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=8192,
-        extra_body={"reasoning": {"enabled": True}},
-    )
+    def _make_call():
+        response = client.chat.completions.create(
+            model="anthropic/claude-opus-4.5",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=8192,
+            extra_body={"reasoning": {"enabled": True}},
+        )
+        return response.choices[0].message.content or ""
 
-    return response.choices[0].message.content or ""
+    return client.with_retry(_make_call, f"LLM spec generation for {example_id}")
 
 
 # ---------- Example-level parsing ----------

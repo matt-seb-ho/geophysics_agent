@@ -49,13 +49,37 @@ def main():
         default=100,
         help="Maximum agent-tool iterations (default: 100).",
     )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=3,
+        help="Maximum number of API retry attempts (default: 3).",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=1.0,
+        help="Initial delay between retries in seconds (default: 1.0).",
+    )
+    parser.add_argument(
+        "--retry-backoff",
+        type=float,
+        default=2.0,
+        help="Exponential backoff multiplier for retry delays (default: 2.0).",
+    )
 
     args = parser.parse_args()
     workspace_root = Path(args.workspace).resolve()
     log_path = Path(args.log) if args.log else None
 
     tools = build_default_tools(workspace_root)
-    config = AgentConfig(model=args.model, max_steps=args.max_steps)
+    config = AgentConfig(
+        model=args.model,
+        max_steps=args.max_steps,
+        max_retries=args.max_retries,
+        retry_delay=args.retry_delay,
+        retry_backoff=args.retry_backoff,
+    )
     agent = GeosAgent(
         workspace_root=workspace_root,
         tools=tools,

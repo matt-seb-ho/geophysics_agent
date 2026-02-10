@@ -45,6 +45,11 @@ class RunGeosTool(Tool):
     def __init__(self, workspace_root: Path):
         self.workspace_root = Path(workspace_root).resolve()
 
+    def format_execution_summary(self, input_path: str, extra_args: str = "", timeout_sec: float = 300.0, **kwargs) -> str:
+        if extra_args:
+            return f"running GEOS simulation '{input_path}' with args: {extra_args}"
+        return f"running GEOS simulation '{input_path}'"
+
     def run(
         self, input_path: str, extra_args: str = "", timeout_sec: float = 300.0
     ) -> Dict[str, Any]:
