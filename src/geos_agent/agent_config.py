@@ -10,6 +10,9 @@ class AgentConfig:
     reasoning: bool = True
     mode: str = "auto"  # "auto" or "interactive"
 
+    # Context configuration
+    include_primer: bool = True  # Include GEOS_PRIMER.md in agent context at startup
+
     # API retry configuration
     max_retries: int = 3  # Maximum number of retry attempts for API calls
     retry_delay: float = 1.0  # Initial delay between retries in seconds

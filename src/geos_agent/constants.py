@@ -24,6 +24,9 @@ DATA_DIR = PROJECT_ROOT / "data"
 INPUT_DIR = DATA_DIR / "inputs"
 OUTPUT_DIR = DATA_DIR / "outputs"
 
+# GEOS Primer (high-level documentation summary for agent context)
+PRIMER_PATH = PROJECT_ROOT / "GEOS_PRIMER.md"
+
 # Knowledge Base Paths
 GEOS_SOURCE_DIR = DATA_DIR / "geos_source"  # Raw GEOS docs (RST/XML)
 CHUNKS_DIR = DATA_DIR / "chunks"            # Processed hierarchical chunks

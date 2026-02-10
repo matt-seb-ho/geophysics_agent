@@ -88,6 +88,22 @@ config = AgentConfig(
 )
 ```
 
+**GEOS Primer Context** (recommended):
+
+By default, the agent loads `GEOS_PRIMER.md` into its context at startup (`include_primer=True`). This primer provides:
+- High-level overview of GEOS capabilities and architecture
+- XML structure, conventions, and common solver patterns
+- Documentation roadmap for efficient RAG searches
+- Quick reference for units, common pitfalls, and debugging tips
+
+This helps the agent understand GEOS fundamentals before querying the RAG system, improving response accuracy. You can disable it if needed:
+
+```python
+config = AgentConfig(
+    include_primer=False  # Disable primer to reduce context size
+)
+```
+
 ## Project Structure
 
 ```
