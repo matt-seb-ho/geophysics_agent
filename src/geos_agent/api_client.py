@@ -71,6 +71,12 @@ class OpenRouterClient:
         )
         self.retry_config = retry_config or RetryConfig()
         self.log_callback = log_callback
+        # Track cumulative token usage
+        self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+    def get_token_usage(self) -> dict:
+        """Return the cumulative token usage for this client instance."""
+        return self.usage
 
     def _log(self, event: str, **kwargs: Any) -> None:
         """Log an event if a callback is configured."""
@@ -303,6 +309,12 @@ class OpenRouterClient:
                 for chunk in stream:
                     # Capture usage if present (usually in the last chunk)
                     if chunk.usage:
+                        # Accumulate to client instance state
+                        self.usage["prompt_tokens"] += chunk.usage.prompt_tokens
+                        self.usage["completion_tokens"] += chunk.usage.completion_tokens
+                        self.usage["total_tokens"] += chunk.usage.total_tokens
+                        
+                        # Also track for this specific call
                         usage_data["prompt_tokens"] = chunk.usage.prompt_tokens
                         usage_data["completion_tokens"] = chunk.usage.completion_tokens
                         usage_data["total_tokens"] = chunk.usage.total_tokens

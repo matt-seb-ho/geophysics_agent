@@ -252,7 +252,6 @@ class GeosAgent:
             ]
 
         self.tool_map = {t.name: t for t in self.tools}
-        self.token_usage = {"input": 0, "output": 0}
 
     # ------------- logging -------------
 
@@ -328,11 +327,7 @@ class GeosAgent:
             "tool_calls": tool_calls_list,
             "tool_responses": tool_responses,
             "summary": summary,
-            "usage": {
-                "total_input_tokens": self.token_usage["input"],
-                "total_output_tokens": self.token_usage["output"],
-                "total_tokens": self.token_usage["input"] + self.token_usage["output"]
-            },
+            "usage": self.client.get_token_usage(),
             "all_messages": self.messages,
         }
 
@@ -445,11 +440,7 @@ class GeosAgent:
         for step_idx in range(1, self.config.max_steps + 1):
             self._log("step_start", step=step_idx)
 
-            assistant_text, tool_calls, usage = self._call_model_streaming()
-
-            # Accumulate usage
-            self.token_usage["input"] += usage.get("prompt_tokens", 0)
-            self.token_usage["output"] += usage.get("completion_tokens", 0)
+            assistant_text, tool_calls, _ = self._call_model_streaming()
             last_assistant_text = assistant_text
 
             assistant_message: Dict[str, Any] = {
