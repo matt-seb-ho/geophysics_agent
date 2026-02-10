@@ -1,0 +1,130 @@
+# Natural Language Specification for Mandel's Problem XML Configuration
+
+## Overview and Simulation Type
+
+Create an XML configuration file for simulating Mandel's 2D consolidation problem, a classic poroelasticity benchmark. This is a coupled poromechanical simulation that models the consolidation of a fully saturated, homogeneous, isotropic poroelastic slab compressed between two rigid and impermeable plates under a constant normal force. The simulation captures time-dependent pore pressure evolution and mechanical deformation due to fluid diffusion and poroelastic coupling effects. The model represents plane strain deformation with lateral drainage, and only a quarter of the computational domain in the x-z plane is modeled (exploiting symmetry).
+
+## Solver Configuration
+
+Configure three solvers that work together for the coupled poromechanical analysis:
+
+### Primary Coupling Solver
+- Create a coupling solver of type **SinglePhasePoromechanics** with the name "poroSolve"
+- This solver must reference the fluid solver named "SinglePhaseFlow" and the solid solver named "lagsolve"
+- Specify the porous material name as "shale"
+- Set the discretization method to "FE1" (defined in NumericalMethods section)
+- Target the region named "Domain"
+
+### Solid Mechanics Solver
+- Create a solver of type **SolidMechanicsLagrangianFEM** with the name "lagsolve"
+- This handles the mechanical deformation of the solid skeleton
+
+### Flow Solver
+- Create a solver of type **SinglePhaseFVM** with the name "SinglePhaseFlow"
+- This handles single-phase fluid flow through the porous medium
+
+## Mesh Specification
+
+Use the internal mesh generator (InternalMesh) with the following parameters:
+
+- **Element Distribution**: 20 elements in x-direction, 1 element in y-direction, 20 elements in z-direction
+- **Element Type**: Eight-node hexahedral brick elements specified as "C3D8"
+- **Cell Block Name**: "cb1"
+- **Domain Dimensions**: The full slab is 2.0 meters in length (x-direction) and 2.0 meters in height (z-direction), but since only a quarter domain is modeled, the computational domain spans from 0 to 1.0 m in x and 0 to 1.0 m in z
+- **Y-direction**: Minimal thickness (single element) as this is essentially a 2D plane strain problem
+- The mesh should be structured/regular
+
+## Constitutive Models and Material Properties
+
+Define constitutive models in the Constitutive section:
+
+### Porous Solid Material
+- Use the **PorousElasticIsotropic** model for the solid material named "shaleSolid"
+- The combined porous material should be named "shale"
+- **Bulk Modulus (K)**: 66.667 MPa
+- **Shear Modulus (G)**: 40.0 MPa
+- **Porosity (φ)**: 0.375
+- **Grain Bulk Modulus (Ks)**: 1.0 × 10²⁷ Pa (effectively incompressible grains)
+- **Permeability (κ)**: 1.0 × 10⁻¹² m²
+
+### Fluid Properties
+- Use **CompressibleSinglePhaseFluid** model for the fluid named "water"
+- **Fluid Density (ρf)**: 1000 kg/m³
+- **Fluid Compressibility (cf)**: 4.4 × 10⁻¹⁰ Pa⁻¹
+- **Fluid Viscosity (μ)**: 1.0 × 10⁻³ Pa·s (0.001 Pa·s)
+
+All values should be specified in SI units (International System of Units).
+
+## Initial Conditions
+
+Initialize the following fields corresponding to the undrained response based on the Skempton effect:
+
+- **Initial Displacement Field**: Set initial displacements based on the undrained analytical solution
+- **Initial Effective Stress**: Initialize the effective stress field
+- **Initial Pore Pressure**: Set the initial pore pressure corresponding to the instantaneous overpressure from the Skempton effect
+
+## Boundary Conditions
+
+Define boundary conditions in the FieldSpecifications section:
+
+### Top Surface (zpos - positive z boundary)
+- Apply the analytical z-displacement to enforce the rigid plate condition
+- This represents the loaded boundary where the compressive force is applied
+- The applied force per unit length is -10,000 N/m (negative sign convention for compression in GEOS)
+
+### Lateral Surface (xpos - positive x boundary)
+- Set as traction-free (zero normal traction)
+- Allow drainage (specify pressure boundary condition for fluid flow, likely zero pressure or atmospheric pressure)
+
+### Symmetry Boundaries
+- **xneg (x = 0)**: Apply roller constraint (zero x-displacement, symmetry condition)
+- **zneg (z = 0)**: Apply roller constraint (zero z-displacement, symmetry condition)
+
+### Other Boundaries
+- The y-direction boundaries (ypos and yneg) should have appropriate plane strain constraints (zero y-displacement)
+
+## Numerical Methods
+
+Define a finite element discretization method named "FE1" in the NumericalMethods section that is compatible with the C3D8 hexahedral elements and the coupled poromechanical formulation.
+
+## Time History and Data Collection
+
+Configure Tasks section with PackCollection tasks:
+
+### Pressure Collection
+- Create a PackCollection task named "pressureCollection"
+- Collect the field named "pressure"
+- This captures pore pressure history across the computational domain
+
+### Displacement Collection
+- Create a PackCollection task named "displacementCollection"
+- Collect the field named "totalDisplacement"
+- This captures displacement field history across the domain
+
+### Event Triggering
+- Define a PeriodicEvent in the Events section to trigger these collection tasks at regular intervals
+- Specify appropriate filenames for output: the system will generate "displacement_history.hdf5" and "pressure_history.hdf5" files
+
+## Output Configuration
+
+### VTK Output
+- Configure VTK-format output files for visualization in Paraview
+- Include pore pressure and displacement fields in the output
+
+### HDF5 Time History Output
+- The TimeHistory output will automatically create HDF5 files containing:
+  - Simulation time data
+  - Element center coordinates
+  - Time history of collected field data (pressure and displacement)
+
+## Simulation Timeline
+
+The simulation should run long enough to capture the consolidation process, with results expected to be visualized at time t = 10 seconds as a reference point. Configure appropriate time stepping to resolve the early-time Mandel-Cryer effect (initial pressure increase before decay) and the subsequent consolidation behavior.
+
+## File Organization
+
+The configuration should be split into two files:
+1. A base file (PoroElastic_Mandel_base.xml) containing the constitutive models, boundary conditions, field specifications, and tasks
+2. A benchmark file (PoroElastic_Mandel_benchmark_fim.xml) containing the mesh definition and solver configurations, which includes/references the base file
+
+Alternatively, create a single comprehensive XML file that contains all required sections: Solvers, Mesh, Geometry, NumericalMethods, Constitutive, FieldSpecifications, Tasks, Events, and Outputs.

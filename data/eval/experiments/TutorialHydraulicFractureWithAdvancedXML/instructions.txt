@@ -1,0 +1,203 @@
+# Natural Language Specification for Hydraulic Fracturing Simulation XML Configuration
+
+## Overview and Simulation Type
+
+Create an XML configuration file for a fully coupled hydraulic fracturing simulation in GEOS. This simulation models the propagation of a single hydraulic fracture within a reservoir that has heterogeneous in-situ properties. The geological model follows a randomly generated, fractal, 1D layer-cake structure. The configuration should support advanced XML features including parameters, symbolic math expressions, and unit definitions, requiring preprocessing with the geosx_xml_tools package.
+
+## File Structure
+
+The configuration should be split into two XML files:
+1. A case-specific file (primary file) containing parameters, mesh definition, geometry, and case-specific boundary conditions
+2. A base file (to be included) containing solvers, events, common boundary conditions, and function definitions
+
+The case-specific file must include an instruction to incorporate the base XML file at its beginning.
+
+## Parameters Block
+
+Define a Parameters block with name-value pairs for variables used throughout the configuration. Parameter names should contain only alphanumeric characters and underscores. Include the following key parameters:
+
+- **t_max**: Maximum simulation time, set to 20 minutes (use unit notation with square brackets)
+- **mu**: Fluid viscosity, default value of 1 cP (0.001 Pa·s in SI units)
+- **mu_upscaled**: A symbolic expression (denoted by back-ticks) that depends on other parameters and will be evaluated during preprocessing
+- **pump_start**: Time delay before turning on the pump
+- **pump_ramp**: Duration of the ramp-up period after pump start
+- **pump_ramp_dt_limit**: Timestep limit during the pump ramp period
+- **t_allocation**: Runtime allocation for HaltEvent, set to 28 minutes
+- **table_root**: Root path to the directory containing table files
+
+## Mesh Specification
+
+Create an internal mesh with biased boundaries to reduce problem size while maintaining desired spatial extents. The mesh should use the following characteristics:
+
+- **Mesh type**: Internal mesh with bias capability
+- **Bias approach**: 
+  - A bias value of 0 indicates uniform element sizing in that region
+  - A bias value of -0.6 indicates elements that smoothly increase in size moving in the positive direction (left-hand element is 60% smaller than average, right-hand element is 60% larger)
+- **X-axis**: Define at least two regions - a first region with zero bias (uniform mesh) and a second region with -0.6 bias
+- **Y-axis and Z-axis**: Follow similar patterns with appropriate biasing for boundary regions
+- **Element type**: Hexahedral elements suitable for the solid mechanics and fluid solvers
+
+## Geometry and Nodeset Definitions
+
+Define three critical nodesets for fracture modeling on the plane y = 0:
+
+1. **source_a**: The fluid injection location. Should be a single face in the x-z plane where fluid will be injected.
+
+2. **perf_a**: The initial fracture/perforation. Must be at least two faces wide in the x-z plane to ensure at least one internal node is open to represent the initial fracture.
+
+3. **fracturable_a**: The set of faces where fracture propagation is permitted. For a planar fracture at y = 0, this defines the allowable fracture growth surface.
+
+## Solvers Configuration
+
+Configure four solvers in the base XML file:
+
+1. **Hydrofracture Solver** (primary solver):
+   - This is the main coupled solver called by the event manager
+   - Must reference the dependent solid and fluid solver names
+   - Specify gravity vector attribute indicating gravity acts in the z-direction
+
+2. **SolidMechanicsLagrangianFEM Solver**:
+   - Handles the solid mechanics/geomechanics portion
+   - Configure for the rock matrix deformation
+
+3. **SinglePhaseFVM Solver**:
+   - Handles fluid flow within the fracture
+   - Finite volume method for single-phase flow
+
+4. **SurfaceGenerator Solver**:
+   - Manages face breaking and fracture propagation
+   - Controls how faces in the model are allowed to separate
+
+## Constitutive Models and Material Properties
+
+Define heterogeneous material properties that vary spatially based on table functions:
+
+- **Rock bulk modulus**: Specified via 3D table function varying with position
+- **Rock shear modulus**: Specified via 3D table function varying with position
+- **Fluid density**: Water density for initializing fluid in the perforation
+- **Fluid viscosity**: Default 1 cP (can be overridden via command-line to values like 5 cP / 0.005 Pa·s)
+
+## Boundary Conditions
+
+### Case-Specific Boundary Conditions:
+
+1. **frac**: Field specification to mark the initial perforation on the perf_a nodeset
+
+2. **separableFace**: Field specification marking faces in fracturable_a that are allowed to break during simulation
+
+3. **waterDensity**: Field specification to initialize fluid density in the perforation region
+
+4. **sourceTerm**: Source boundary condition for fluid injection:
+   - Applied to source_a nodeset
+   - Scale value should use symbolic expressions and parameters
+   - Driven by a time-dependent function (flow_rate)
+
+### Base File Boundary Conditions:
+
+1. **Initial in-situ stresses**: 
+   - sigma_xx, sigma_yy, sigma_zz components
+   - Specified using 3D table functions based on element center positions
+
+2. **Initial in-situ rock properties**:
+   - Bulk and shear moduli specified via table functions
+
+3. **External mechanical boundaries**:
+   - Roller boundary conditions (zero normal displacement) on outer surfaces
+   - These constrain normal displacement while allowing tangential sliding
+   - Position these far enough from the fracture to avoid affecting growth
+
+## Function Definitions
+
+Define the following table functions in the base XML file:
+
+1. **flow_rate** (1D TableFunction):
+   - Input: time
+   - Single coordinate file for time values
+   - Single voxel file for flow rate values
+   - Interpolation method: linear
+   - Creates a trapezoidal flow rate profile
+   - Reference coordinate file: flowRate_time.csv
+   - Reference voxel file: flowRate.csv
+
+2. **sigma_xx, sigma_yy, sigma_zz** (3D TableFunctions):
+   - Input: elementCenter (vector quantity)
+   - Three coordinate files (one per axis)
+   - Single voxel file for stress values
+   - Interpolation method: upper (values represent top of each layer)
+   - For layer-cake model, x and y coordinate arrays can have size 1
+
+3. **Bulk modulus and Shear modulus** (3D TableFunctions):
+   - Similar structure to stress functions
+   - Vary with position according to geological model
+
+Use the table_root parameter to specify the path to table files.
+
+## Events Configuration
+
+Configure the following events with flexible timestepping:
+
+1. **solverApplications** (PeriodicEvent):
+   - Target: Hydrofracture solver
+   - maxEventDt: 30 seconds
+   - Controls main solver execution
+
+2. **pumpStart** (PeriodicEvent):
+   - Begin time: pump_start parameter
+   - End time: pump_start + pump_ramp
+   - maxEventDt: pump_ramp_dt_limit
+   - No target specified (only influences timestep behavior)
+   - Limits timestep during critical early fracture development
+
+3. **preFracture** (SoloEvent):
+   - Target: SurfaceGenerator
+   - Executes at beginning of simulation
+   - Initializes the fracture
+
+4. **outputs_vtk** (PeriodicEvent):
+   - Target: VTK output
+   - Time frequency: every 1 minute (60 seconds)
+
+5. **outputs_silo** (PeriodicEvent):
+   - Target: Silo output
+   - Time frequency: every 1 minute (60 seconds)
+
+6. **restarts** (HaltEvent - can be set inactive):
+   - Tracks external/wall clock time
+   - Maximum runtime: t_allocation (28 minutes)
+   - Target: restart file writer
+   - When runtime exceeds allocation, writes restart and exits gracefully
+
+## Output Specifications
+
+Configure two output formats:
+
+1. **VTK Output**:
+   - For visualization in Paraview
+   - Include fracture geometry, aperture, and pressure fields
+   - Note: May require Multi-block Inspector in Paraview to isolate fracture
+
+2. **Silo Output**:
+   - For visualization in VisIt
+   - Recommended format for VisIt due to VTK compatibility issues
+   - Include same fields as VTK output
+
+3. **Restart Output**:
+   - For checkpoint/restart capability
+   - Triggered by HaltEvent when approaching time allocation
+
+## Numerical Method Specifications
+
+- **Solid mechanics**: Lagrangian finite element method
+- **Fluid flow**: Single-phase finite volume method
+- **Coupling**: Fully coupled hydrofracture formulation
+- **Timestep control**: Adaptive, with maximum of 30 seconds, reduced during pump ramp period
+- **Fracture propagation**: Managed by SurfaceGenerator with separable face criterion
+
+## Additional Notes
+
+- All symbolic expressions should be enclosed in back-ticks for preprocessing
+- Unit specifications use square brackets after values (e.g., "20 [min]")
+- Parameters can reference other parameters (avoid circular definitions)
+- The preprocessor will generate a .preprocessed file that should be verified
+- Command-line parameter override is supported using "-p name value" syntax
+- Ensure mesh boundaries are far enough from fracture to avoid artificial constraint effects on growth

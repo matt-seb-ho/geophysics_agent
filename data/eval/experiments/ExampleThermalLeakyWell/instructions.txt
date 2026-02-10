@@ -1,0 +1,146 @@
+# Natural Language Specification for Non-Isothermal CO2 Plume Evolution and Leakage Through an Abandoned Well Simulation
+
+## 1. Simulation Type and Physical Problem
+
+This simulation models non-isothermal CO2 injection into a saline aquifer with subsequent leakage through an abandoned well to a shallower aquifer. The problem involves two-phase (CO2-rich phase and brine phase), two-component (CO2 and water) flow with thermal effects and mass exchange between phases. Unlike simpler isothermal immiscible models, this simulation accounts for:
+
+- CO2 dissolution in the brine phase (with solubility dependent on pressure, temperature, and salinity)
+- Nonlinear dependence of densities and viscosities on pressure, temperature, and salinity
+- A geothermal gradient of 0.03 K/m affecting fluid properties throughout the domain
+
+The simulation can be configured in two modes: (1) flow and mass transfer without heat transfer (using a constant-in-time geothermal gradient for temperature-dependent properties), or (2) a fully thermal model solving mass and heat transfer equations.
+
+## 2. Solver Parameters and Settings
+
+Create a solver block using the **CompositionalMultiphaseFVM** solver type. This is GEOS's general-purpose multiphase compositional flow solver using the finite volume method.
+
+Required solver attributes:
+- A mandatory temperature attribute must be specified, though it will be overridden by GEOS to impose a non-uniform geothermal gradient along the z-axis
+- The solver should be configured for two-phase, two-component flow (CO2 and brine)
+- Target the appropriate element regions defined in the mesh
+
+## 3. Mesh Requirements
+
+The domain has dimensions of 1000 m × 1000 m × 160 m, located at depths between 640 m and 800 m below the surface.
+
+Two mesh options should be considered:
+- A "coarse" structured mesh containing 206,070 cells, with spatial resolution similar to that used by most codes in the Class et al. (2009) benchmark study
+- A "fine" structured mesh containing 339,390 cells, with enhanced spatial refinement between the two wells (injection well and leaky well)
+
+The mesh should be structured and defined using internal mesh generation capabilities. The fine mesh is recommended when accurate leakage rate predictions are needed, as results are highly dependent on spatial refinement, particularly in the region between wells.
+
+Define four element regions within the mesh. Each element region's material list must include references to:
+- The fluid model
+- The rock properties
+- The relative permeability model
+- The capillary pressure constitutive model (referenced as "cappres")
+
+## 4. Material Properties and Constitutive Models
+
+### 4.1 Fluid Model (CO2-Brine)
+
+Use the **CO2BrinePhillips** fluid model block to define the two-phase, two-component CO2-brine system. This model requires three parameter files:
+
+**CO2 Properties (pvtgas.txt):**
+- CO2 density computed using Span and Wagner (1996) model
+- CO2 viscosity computed using Fenghour and Wakeham (1998) model
+- Pressure tabulation range: 6.6×10⁶ Pa to 4×10⁷ Pa with spacing of 1×10⁶ Pa
+- Temperature tabulation range: 302 K to 312 K with increment of 5 K
+- Note: Constant extrapolation is used if pressure or temperature exceed tabulated ranges
+
+**Brine Properties (pvtliquid.txt):**
+- Brine density and viscosity computed using Phillips et al. (1981) model
+- Brine density modified for dissolved CO2 using Garcia (2001) method
+- Same pressure and temperature ranges as CO2 properties
+- Salinity specified as molal concentration: 1.901285269 moles NaCl per kg of solvent (equivalent to 10 weight%)
+
+**CO2 Solubility (co2flash.txt):**
+- CO2 solubility in brine computed using Duan and Sun (2004) model
+- Solubility depends nonlinearly on pressure, temperature, composition, and salinity
+- Same pressure-temperature table parameters as above
+
+### 4.2 Relative Permeability Model
+
+Use Brooks-Corey relative permeability tables with the following parameters:
+- Wetting-phase saturation range: 0.2 to 0.95
+- Relative permeability values constructed from benchmark parameters and defined via TableFunction blocks
+
+### 4.3 Capillary Pressure Model
+
+Use Brooks-Corey capillary pressure tables with:
+- Entry pressure: 10,000 Pa
+- Brooks-Corey exponent parameter: 2
+- Wetting-phase saturation range: 0.2 to 0.95
+- Values defined via TableFunction blocks
+
+## 5. Initial and Boundary Conditions
+
+### 5.1 Initial Conditions
+
+Use the **HydrostaticEquilibrium** initialization in the FieldSpecifications block with:
+- Domain initially fully saturated with brine (no initial CO2)
+- Hydrostatic pressure field accounting for depth-dependent brine density
+- Geothermal gradient of 0.03 K/m
+- Reference a TableFunction named "initTempTable" that specifies the temperature distribution along the z-axis
+- GEOS will account for nonlinear temperature dependence of brine density when equilibrating the pressure field
+
+### 5.2 Boundary Conditions
+
+**Dirichlet Boundary Conditions:**
+Apply to four lateral sides of the domain (east, west, south, north boundaries):
+- Define boundary sets using Box geometry tags in the Geometry section
+- Use table-based approach to impose pressure and composition values
+- Pressure specified as a linear gradient along the z-axis, with minimum and maximum values matching initial state values
+- Define appropriate TableFunction blocks for pressure variation with depth (using z-coordinate tables)
+
+Note: Due to nonlinear brine density dependence on temperature, the simple two-point linear pressure gradient does not exactly preserve the initial hydrostatic condition. For exact preservation, use as many points in the z-table as there are cells along the z-axis.
+
+### 5.3 Source/Injection Conditions
+
+Use a **SourceFlux** block to define CO2 injection:
+- Injection rate: 8.87 kg/s (referenced in validation metrics as the denominator for leakage rate percentage calculations)
+- Configure injection location and timing consistent with the benchmark problem (injection well location as defined in the isothermal leaky well example)
+
+## 6. Numerical Method Specifications
+
+- Finite Volume Method (FVM) discretization via CompositionalMultiphaseFVM solver
+- Time stepping should be configured to run for at least 2,000 days to capture full leakage behavior
+- Key output times include 1,000 days (for visualization) and 2,000 days (for validation metrics)
+- Results are sensitive to time step size, so appropriate time step controls should be implemented
+- The solver handles the nonlinear coupling between pressure, temperature, composition, and fluid properties
+
+## 7. Output Requirements
+
+Configure VTK-format output for visualization in Paraview:
+
+**Required output fields:**
+- CO2 saturation (phase saturation of CO2-rich phase)
+- Pressure field
+- Temperature field (if running thermal model)
+
+**Validation metrics to extract:**
+- CO2 plume arrival time at the leaky well (detected using 0.005% leakage rate threshold)
+- CO2 leakage rate through the leaky well (CO2 mass flow at midway between top and bottom aquifers, expressed as percentage of injection rate)
+- Maximum leakage rate and time at which it occurs
+- Leakage rate at 2,000 days
+
+**Expected results ranges for validation:**
+- Arrival time: approximately 37-47 days depending on mesh refinement
+- Maximum leakage rate: approximately 0.10-0.12%
+- Time at maximum leakage: approximately 425-440 days
+- Leakage rate at 2,000 days: approximately 0.075-0.085%
+
+**Visualization specifications:**
+- Create slice views at x = 0 for 2D visualization of CO2 saturation and pressure distributions
+- Time series data for leakage rate calculations
+
+## 8. Functions and Tables
+
+Define the following TableFunction blocks:
+- Temperature initialization table ("initTempTable") specifying geothermal gradient
+- Pressure boundary condition tables for Dirichlet conditions
+- Z-coordinate tables ("zlin.geos" or equivalent) for spatial interpolation
+- Relative permeability tables for both phases
+- Capillary pressure tables
+
+All table files should be properly referenced with correct file paths relative to the XML input file location.

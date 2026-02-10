@@ -1,0 +1,237 @@
+# Natural Language Specification for Sneddon's Problem XML Configuration
+
+## Overview
+
+This specification describes the configuration for Sneddon's Problem, a fracture mechanics validation study that computes the displacement field induced by a pressurized fracture in a porous medium. The simulation can be configured using three different solver approaches: EmbeddedFractures, LagrangianContact, or HydroFracture. Each approach requires a slightly different configuration, which will be detailed below.
+
+The analytical solution being validated is for fracture aperture (normal opening) of a pressurized fracture of known length, where the aperture depends on Young's modulus, Poisson's ratio, fracture pressure, and fracture length.
+
+---
+
+## Configuration Option 1: EmbeddedFractures Solver Approach
+
+### Simulation Type
+A solid mechanics simulation with embedded fractures for modeling a pressurized static fracture in a porous medium.
+
+### Solver Specifications
+
+Define two solvers:
+
+1. **Primary Solver**: Type "SolidMechanicsEmbeddedFractures"
+   - Assign a user-defined name (e.g., "mechSolve")
+   - This solver handles the mechanics of the porous medium with embedded fracture elements
+
+2. **Surface Generator**: Type "EmbeddedSurfaceGenerator"
+   - This solver discretizes the fracture planes within the mesh
+
+### Mesh Requirements
+
+- **Mesh Type**: Internal mesh generator (InternalMesh)
+- **Domain Dimensions**: 40 meters × 40 meters × 1 meter
+- **Element Distribution**: 
+  - X-direction: 121 elements
+  - Y-direction: 921 elements
+  - Z-direction: 1 element (single element thickness)
+- **Element Type**: C3D8 (eight-node hexahedral brick elements)
+- **Cell Block Name**: "cb1"
+- **Note**: Mesh refinement should conform to the fracture geometry specified in the Geometry section
+
+### Material Properties
+
+Define constitutive properties in the Constitutive section:
+- **Bulk Modulus (K)**: 16.7 GPa
+- **Shear Modulus (G)**: 10.0 GPa
+
+### Fracture Definition (Geometry Section)
+
+- **Fracture Length**: 2.0 meters
+- **Fracture Location**: Define a nodeset occupying a small region within the computational domain where the fracture will open upon internal pressurization
+- **Fracture Pressure**: -2.0 MPa (negative value due to GEOS sign convention where compression is negative)
+- **Fracture Propagation**: Disabled (static fracture only)
+
+### Event Specifications
+
+Define multiple events:
+1. An event to execute the EmbeddedSurfaceGenerator for generating fracture elements (should run first/initially)
+2. A periodic event for executing the embedded fractures mechanics solver
+3. Three periodic events for outputting simulation results
+
+### Tasks Section
+
+Define a PackCollection task for collecting time history information:
+- **Purpose**: Collect fracture aperture (normal opening) data
+- **Field Name**: Use appropriate field name for embedded fractures (displacementJump or equivalent)
+- **Object Path**: Path to embedded surface elements
+
+### Output Requirements
+
+- **Output Format**: HDF5 files
+- **Filename**: User-defined string for output identification
+- **Data Collected**: 
+  - Simulation time
+  - Element center coordinates in local coordinate system
+  - Fracture aperture (normal opening) time history
+
+---
+
+## Configuration Option 2: LagrangianContact Solver Approach
+
+### Simulation Type
+A Lagrangian contact mechanics simulation coupling rock and fracture deformations with frictional contact.
+
+### Solver Specifications
+
+Define two solvers:
+
+1. **Primary Solver**: Type "LagrangianContact" (name e.g., "lagrangiancontact")
+   - **Target Regions**: Must include both:
+     - Continuum region named "Region"
+     - Discontinuum region named "Fracture"
+   - **Contact Relation**: Reference to contact constitutive law named "frictionLaw"
+
+2. **Surface Generator**: Type "SurfaceGenerator"
+   - Defines the fracture region and rock toughness
+
+### Mesh Requirements
+
+- **Mesh Type**: Internal mesh generator (InternalMesh)
+- **Domain Dimensions**: 40 meters × 40 meters × 1 meter
+- **Element Distribution**: 
+  - X-direction: 300 elements
+  - Y-direction: 300 elements
+  - Z-direction: 2 elements
+- **Element Type**: C3D8 (eight-node hexahedral brick elements)
+- **Cell Block Name**: "cb1"
+- **Note**: Refinement necessary to conform with fracture geometry
+
+### Material Properties
+
+Define in Constitutive section:
+- **Bulk Modulus (K)**: 16.7 GPa
+- **Shear Modulus (G)**: 10.0 GPa
+- **Contact Constitutive Law**: Define a friction law named "frictionLaw" for fracture elements
+
+### Fracture Definition (Geometry Section)
+
+- **Fracture Length**: 2.0 meters
+- **Fracture Pressure**: -2.0 MPa
+- **Fracture Propagation**: Disabled
+- Define nodeset for fracture location within domain
+
+### Event Specifications
+
+Similar structure to EmbeddedFractures case:
+- Event for surface generator execution
+- Periodic event for solver execution
+- Periodic events for output
+
+### Tasks Section
+
+Define PackCollection task:
+- **Purpose**: Collect fracture aperture data
+- **Field Name**: Appropriate field for contact mechanics (displacement jump or similar)
+- **Object Path**: Path to fracture surface elements
+
+### Output Requirements
+
+- HDF5 format TimeHistory files
+- Fracture normal opening data
+- Time and spatial coordinate information
+
+---
+
+## Configuration Option 3: HydroFracture Solver Approach
+
+### Simulation Type
+A coupled hydrofracture simulation modeling fluid flow within the fracture, rock deformation, and fracture opening/closure.
+
+### Solver Specifications
+
+Define three coupled solvers within a "Hydrofracture" solver:
+
+1. **Solid Mechanics Solver**: Type "SolidMechanicsLagrangianFEM"
+   - **Target Regions**: Both continuum region and fracture region
+   - **Contact Relation Name**: Specify the contact constitutive behavior
+
+2. **Flow Solver**: Type "SinglePhaseFVM"
+   - Solves single-phase fluid flow inside the fracture using finite volume method
+
+3. **Surface Generator**: Type "SurfaceGenerator"
+   - Defines fracture region and rock toughness
+
+### Mesh Requirements
+
+- **Mesh Type**: Internal mesh generator (InternalMesh)
+- **Domain Dimensions**: 40 meters × 40 meters × 1 meter
+- **Element Distribution**: 
+  - X-direction: 280 elements
+  - Y-direction: 280 elements
+  - Z-direction: 1 element
+- **Element Type**: C3D8 (eight-node hexahedral brick elements)
+- **Cell Block Name**: "cb1"
+
+### Material Properties
+
+Define in Constitutive section:
+- **Bulk Modulus (K)**: 16.7 GPa
+- **Shear Modulus (G)**: 10.0 GPa
+- Additional fluid properties as required for single-phase flow
+
+### Fracture Definition (Geometry Section)
+
+- **Fracture Length**: 2.0 meters
+- **Fracture Pressure**: -2.0 MPa (internal pressurization)
+- **Fracture Propagation**: Disabled (to match analytical solution conditions)
+- Define appropriate nodeset for fracture geometry
+
+### Event Specifications
+
+- Event for surface generator
+- Periodic events for coupled hydrofracture solver execution
+- Periodic events for results output
+
+### Tasks Section
+
+Define PackCollection task:
+- **Purpose**: Collect fracture aperture (normal opening) data
+- **Field Name**: Appropriate for hydrofracture (aperture field)
+- **Object Path**: Path to fracture flow elements
+
+### Output Requirements
+
+- HDF5 format TimeHistory files
+- Normal opening/aperture data over time
+- Spatial coordinates and simulation time
+
+---
+
+## Common Boundary Conditions for All Approaches
+
+Specify appropriate boundary conditions in the FieldSpecifications section:
+- Constrain the outer boundaries of the 40m × 40m × 1m domain appropriately for the mechanics problem
+- Apply internal fracture pressure of -2.0 MPa to the fracture surfaces
+- Ensure boundary conditions create a valid representation of Sneddon's infinite medium analytical solution
+
+---
+
+## Summary of Key Numerical Parameters
+
+| Parameter | Value | Units |
+|-----------|-------|-------|
+| Bulk Modulus | 16.7 | GPa |
+| Shear Modulus | 10.0 | GPa |
+| Fracture Length | 2.0 | m |
+| Fracture Pressure | -2.0 | MPa |
+| Domain Size X | 40 | m |
+| Domain Size Y | 40 | m |
+| Domain Size Z | 1 | m |
+
+---
+
+## Notes for Implementation
+
+1. The negative fracture pressure value follows GEOS convention where compressive stresses are negative
+2. No external input files are required; all configuration is self-contained in the XML
+3. The mesh should be refined appropriately near the fracture to capture the displacement gradients
+4. Fracture propagation must be disabled to match the analytical Sneddon solution
+5. Results should be compared against the analytical aperture formula to verify correctness

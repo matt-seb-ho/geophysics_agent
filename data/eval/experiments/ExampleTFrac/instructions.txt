@@ -1,0 +1,141 @@
+# Natural Language Specification for Fracture Intersection Problem XML Configuration
+
+## Overview and Simulation Type
+
+This configuration models a fracture intersection validation problem where two fractures intersect at a right angle within a 2D infinite elastic domain. The simulation uses Lagrangian contact mechanics to analyze the mechanical interaction between a pressurized vertical fracture and a horizontal fracture under uniaxial compressive remote stress. The problem assumes plane strain deformation conditions and uses the Coulomb failure criterion for frictional contact. This is a quasi-static solid mechanics problem without inertial effects.
+
+The configuration will require three XML files that work together: a base file containing common definitions, a benchmark file with mesh specifications, and a contact mechanics file with solver definitions.
+
+## Solver Configuration
+
+### Primary Coupling Solver
+Create a Lagrangian contact solver with the following specifications:
+- Solver name: "lagrangiancontact"
+- Target regions must include both the continuum region (name it "Region") and the discontinuum fracture region (name it "Fracture")
+- Reference the contact constitutive law named "fractureMaterial"
+
+### Solid Mechanics Solver
+Configure a SolidMechanicsLagrangianFEM solver with these settings:
+- Operating mode: QuasiStatic (no inertial effects)
+- Discretization method: Reference "FE1" which will be defined in the NumericalMethods section
+- Solid material: Reference "rock" for the mechanical properties
+
+### Surface Generator Solver
+Include a SurfaceGenerator solver to:
+- Define the fracture region
+- Specify rock toughness properties
+
+## Mesh Requirements
+
+### Internal Mesh Generator
+Use the InternalMesh generator with the following specifications:
+- Element count: 300 elements in the x-direction, 300 elements in the y-direction, and 2 elements in the z-direction (300 x 300 x 2 total)
+- Element type: C3D8 (eight-node hexahedral brick elements)
+- Cell block name: "cb1"
+- The mesh must be configured to allow refinement to conform to the fracture geometry
+
+### Geometry Definition
+Define the fracture geometry in a Geometry section:
+- A horizontal fracture with total length of 50.0 meters
+- A vertical fracture with total length of 100.0 meters
+- The vertical fracture perpendicularly intersects the middle of the horizontal fracture, forming a T-junction
+- Mesh refinement specifications must conform to this fracture geometry
+
+## Material Properties and Constitutive Models
+
+### Rock Material (Elastic Isotropic)
+Define an ElasticIsotropic constitutive model named "rock" with:
+- Bulk Modulus (K): 38.89 GPa (38.89e9 Pa)
+- Shear Modulus (G): 29.17 GPa (29.17e9 Pa)
+- Density: Must be specified in SI units (value should be defined based on the rock type being modeled)
+
+### Fracture Contact Material (Coulomb)
+Define a Coulomb contact constitutive model named "fractureMaterial" with:
+- Cohesion: 0.0 (no cohesive strength)
+- Friction coefficient: 0.577350269 (corresponding to a 30-degree friction angle)
+
+## Numerical Methods
+
+Define a finite element discretization in the NumericalMethods section:
+- Name the discretization "FE1"
+- Configure for use with the Lagrangian finite element formulation
+- Must be compatible with the C3D8 hexahedral elements
+
+## Initial Conditions
+
+### Remote Stress Field
+Initialize a uniaxial vertical compressive stress field:
+- Field name: "SigmaY" or equivalent stress component
+- Value: -1.0e8 Pa (-100 MPa)
+- Apply to the entire computational domain
+- Note: The negative sign indicates compression per GEOS sign convention
+
+## Boundary Conditions
+
+### Fracture Internal Pressure
+Apply a normal traction boundary condition on the vertical fracture surface:
+- Field specification name: "NormalTraction" or similar
+- Value: -1.0e8 Pa (-100 MPa) 
+- Apply to the vertical fracture surface elements
+- The negative value represents compressive/opening pressure per GEOS convention
+
+### Outer Boundary Constraints
+Apply roller constraints (zero normal displacement) to the remaining outer boundaries of the domain to simulate the infinite medium condition.
+
+## Field Specifications Section
+
+The FieldSpecifications section must include:
+1. Initial stress state specification (SigmaY = -1.0e8 Pa)
+2. Traction boundary condition on vertical fracture (NormalTraction = -1.0e8 Pa)
+3. Roller boundary conditions on outer domain boundaries
+
+## Tasks and Time History Collection
+
+### PackCollection Tasks
+Define two PackCollection tasks for time history data extraction:
+
+1. Traction Collection Task:
+   - Task name: "tractionCollection"
+   - Field name to collect: "traction"
+   - Target: fracture surface elements
+
+2. Displacement Jump Collection Task:
+   - Task name: "displacementJumpCollection"  
+   - Field name to collect: "displacementJump"
+   - Target: fracture surface elements
+
+## Events Configuration
+
+### Periodic Events
+Configure PeriodicEvent entries to trigger the time history collection tasks at regular intervals during the simulation.
+
+## Output Requirements
+
+### VTK Output
+Configure VTK-format output for visualization in Paraview, enabling visualization of:
+- Stress components (particularly σxx distribution)
+- Displacement fields
+- Fracture slip distribution
+
+### HDF5 Time History Output
+Configure TimeHistory output that will generate HDF5 files:
+- Filename for displacement jump data: "displacementJump_history.hdf5"
+- Filename for traction data: "traction_history.hdf5"
+- Content includes: simulation time, element centers in local coordinate system, and collected field data
+
+## Summary of Key Numerical Parameters
+
+| Parameter | Value | Units |
+|-----------|-------|-------|
+| Bulk Modulus | 38.89 | GPa |
+| Shear Modulus | 29.17 | GPa |
+| Remote Vertical Stress | -100.0 | MPa |
+| Internal Fracture Pressure | -100.0 | MPa |
+| Friction Coefficient | 0.577350269 | dimensionless |
+| Friction Angle | 30.0 | degrees |
+| Horizontal Fracture Length | 50.0 | m |
+| Vertical Fracture Length | 100.0 | m |
+| Mesh Elements (x) | 300 | count |
+| Mesh Elements (y) | 300 | count |
+| Mesh Elements (z) | 2 | count |
+| Cohesion | 0.0 | Pa |

@@ -1,0 +1,95 @@
+# Natural Language Specification for Drucker-Prager Wellbore Simulation
+
+## 1. Simulation Type and Physical Problem
+
+This simulation models the elastoplastic behavior around a wellbore using the Drucker-Prager constitutive model with cohesion hardening. The problem represents a wellbore subjected to in-situ horizontal and vertical stresses with internal mud pressure. This is a solid mechanics problem that captures the stress redistribution and plastic deformation in the rock formation surrounding a cylindrical wellbore opening.
+
+The configuration requires two XML files working together: a base file containing the core simulation setup and a benchmark file for validation purposes.
+
+## 2. Required Solver Parameters and Settings
+
+Configure a solid mechanics solver (likely named something like "SolidMechanicsLagrangianSSLE" or similar quasi-static solver) for this problem. The solver should:
+
+- Handle elastoplastic material behavior
+- Be configured for quasi-static analysis (wellbore loading problem)
+- Target the computational domain containing the rock material
+- Use appropriate convergence criteria for nonlinear plasticity problems
+- Include sufficient load stepping to capture the elastoplastic response
+
+## 3. Mesh Requirements
+
+The mesh should represent a wellbore geometry with the following specifications:
+
+- **Geometry type**: Cylindrical/annular domain representing the rock formation around the wellbore
+- **Initial wellbore radius**: 0.1 meters
+- **Domain extent**: Should extend sufficiently far from the wellbore to apply far-field stress boundary conditions (typically 10-20 times the wellbore radius)
+- **Element type**: Appropriate for solid mechanics (hexahedral or tetrahedral elements)
+- **Mesh refinement**: Higher resolution near the wellbore wall where stress concentrations and plastic deformation occur, with coarser mesh in the far-field region
+- **Coordinate system**: Likely cylindrical coordinates (r, θ, z) with symmetry considerations
+
+## 4. Material Properties and Constitutive Models
+
+Create a material named "rock" using the **DruckerPrager** constitutive model with the following properties:
+
+**Elastic Properties:**
+- Default bulk modulus: 500 MPa (500.0e6 Pa in SI units)
+- Default shear modulus: 300 MPa (300.0e6 Pa in SI units)
+- Density: Must be specified (value should be appropriate for rock, units in kg/m³)
+
+**Plasticity Parameters:**
+- Default friction angle: 15.27 degrees
+- Default dilation angle: 15.0 degrees
+- Default cohesion: 0.1 MPa (0.1e6 Pa in SI units)
+- Default hardening rate: 10.0 MPa (10.0e6 Pa in SI units)
+
+**Hardening Law:**
+- Linear hardening for cohesion is specified through the hardening rate parameter
+
+Note: All constitutive parameters should be specified in SI units (Pa for stress/modulus quantities, degrees for angles).
+
+## 5. Initial and Boundary Conditions
+
+**Initial Stress State:**
+- Horizontal stress (σh): -11.25 MPa (compressive, following geomechanics sign convention where negative indicates compression)
+- Vertical stress (σv): -15.0 MPa (compressive)
+
+**Boundary Conditions:**
+
+*Far-field boundaries:*
+- Apply the in-situ stress state at the outer boundaries
+- Horizontal stress of -11.25 MPa acting in the horizontal plane
+- Vertical stress of -15.0 MPa acting in the vertical direction
+
+*Wellbore wall (inner boundary):*
+- Apply mud pressure: -2.0 MPa (acting radially inward on the wellbore surface)
+- This represents the drilling fluid pressure supporting the wellbore
+
+*Symmetry conditions:*
+- Apply appropriate symmetry boundary conditions if modeling a quarter or half section of the wellbore to reduce computational cost
+
+## 6. Numerical Method Specifications
+
+- **Analysis type**: Quasi-static solid mechanics
+- **Material nonlinearity**: Elastoplastic behavior with hardening
+- **Solution method**: Incremental loading with nonlinear iterations at each step
+- **Load stepping**: The mud pressure loading should be applied incrementally to capture the evolution of the plastic zone
+- **Convergence criteria**: Appropriate tolerances for force and displacement residuals in the nonlinear solver
+
+## 7. Output Requirements
+
+The simulation should output:
+
+- **Field outputs**: 
+  - Stress tensor components (radial, tangential, vertical, and shear stresses)
+  - Displacement field
+  - Plastic strain or equivalent plastic strain to visualize the plastic zone extent
+  
+- **Output locations**: Results along radial lines from the wellbore wall to capture the variation of stresses and displacements with distance from the wellbore
+
+- **Validation data**: The outputs should be suitable for comparison with analytical solutions derived following the methodology from Chen and Abousleiman (2017), particularly:
+  - Radial stress distribution
+  - Tangential (hoop) stress distribution
+  - Plastic zone radius
+  - Displacement profile
+
+- **Output format**: VTK or similar format for visualization, with time history data for key monitoring points

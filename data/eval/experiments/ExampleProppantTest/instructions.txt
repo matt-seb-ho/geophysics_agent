@@ -1,0 +1,110 @@
+# Natural Language Specification for Proppant Slot Test Simulation
+
+## Overview and Simulation Type
+
+This specification describes a proppant transport simulation that models a laboratory slot test experiment. The simulation validates proppant transport behavior in hydraulic fractures by comparing numerical predictions against experimental data. The physical problem involves multi-component single-phase flow with proppant particles being transported through a fluid-filled slot representing a static hydraulic fracture.
+
+The simulation runs for 30 seconds of physical time, tracking proppant concentration and distribution within the slot.
+
+## Solver Configuration
+
+The simulation requires a coupled solver approach with three distinct solver definitions:
+
+### Primary Coupling Solver
+Define a coupling solver of type "FlowProppantTransport" that binds the proppant transport and flow solvers together. This solver should be named "FlowProppantTransport" and should operate on a region named "Fracture". The coupling solver sequentially calls the two single-physics solvers to solve the proppant transport and pressure sub-problems.
+
+### Proppant Transport Solver
+Define a solver of type "ProppantTransport" named "ProppantTransport". This solver handles the proppant transport calculations within the fracture region.
+
+### Flow Solver
+Define a solver of type "SinglePhaseProppantFVM" named "SinglePhaseFVM". This solver handles the single-phase flow calculations for the carrying fluid.
+
+## Mesh Requirements
+
+Use the internal mesh generator "InternalMesh" to create the computational domain with the following specifications:
+
+- **Element count**: 2 elements in the x-direction, 97 elements in the y-direction, and 24 elements in the z-direction
+- **Element type**: C3D8 (eight-node hexahedral brick elements)
+- **Cell block name**: "cb1"
+- **Domain dimensions** (derived from physical slot):
+  - Fracture length: 1.219 meters (equivalent to 4 feet)
+  - Fracture height: 0.3048 meters (equivalent to 1 foot)
+  - Fracture aperture/gap width: 0.00762 meters (equivalent to 0.3 inches)
+
+The mesh should represent a three-dimensional structured grid that captures the slot geometry with sufficient resolution to model the three inlet positions and proppant transport phenomena.
+
+## Constitutive Models and Material Properties
+
+Define two materials in the Constitutive section:
+
+### Proppant Material (named "sand")
+- Proppant Density: 2550 kg/m³
+- Proppant Diameter: 0.00045 meters (representing 30/50 mesh proppant)
+- Maximum Fraction of Proppant: 0.62 (dimensionless)
+- Hindered Settling Coefficient: 4.5 (dimensionless)
+- Darcy Friction Coefficient: 0.04 (dimensionless)
+- Critical Shields Number: 0.0 (dimensionless)
+
+### Fluid Material (named "water")
+- Fluid Density: 1000 kg/m³
+- Fluid Viscosity: 0.001 Pa·s (approximately 1 centipoise, resembling slickwater)
+
+All constitutive parameters must be specified in SI units (International System of Units).
+
+## Initial Conditions
+
+The following fields must be initialized for this static fracture problem:
+
+1. **Fracture Aperture (elementAperture)**: Initialize with uniform value of 0.00762 meters throughout the domain
+2. **Fluid Pressure**: Initialize the pressure field within the fracture
+3. **Proppant Concentration**: Initialize the proppant concentration field within the fracture
+4. **Rupture State (ruptureState)**: This field is required for static (non-propagating) fracture problems
+
+Note: Both "ruptureState" and "elementAperture" fields are mandatory initial conditions for static fracture configurations where fracture propagation is not simulated.
+
+## Boundary Conditions
+
+Define boundary conditions in the FieldSpecifications section to represent the experimental setup:
+
+### Inlet Conditions
+- **Location**: Three fluid inlets positioned on the right side of the slot, each with 0.5 inch (0.0127 m) inner diameter, spaced 3 inches apart vertically
+- **Flow Rate**: Total constant injection rate of 0.0003785 m³/s (equivalent to 6 gallons per minute), distributed equally among the three inlets
+- **Proppant Concentration**: 0.07 m³/m³ volumetric concentration in the injected slurry (equivalent to approximately 1.5 pounds per gallon)
+- **Pressure Field**: The source flux term should be added to the mass balance equation for pressure (use FieldName="pressure")
+
+### Outlet Conditions
+- **Top Outlet**: One outlet on the top side of the slot for pressure relief
+- **Left Outlet**: One outlet on the left side of the slot acting as a fluid sink
+- Specify appropriate pressure boundary conditions at these outlets
+
+## Physical Assumptions to Encode
+
+The simulation configuration should reflect these physical assumptions:
+
+1. **Vertical fracture**: The fracture surface is vertical (no inclination effects)
+2. **Impermeable fracture walls**: No fluid leak-off through the fracture surfaces
+3. **Static fracture**: The fracture does not propagate; aperture remains constant at 0.00762 meters
+4. **Uniform aperture**: The fracture gap width is uniform throughout the domain
+
+## Numerical Method Specifications
+
+The simulation uses:
+- Finite volume method for the flow solver (indicated by "FVM" in SinglePhaseProppantFVM)
+- Sequential coupling between proppant transport and flow solvers
+- The FlowProppantTransport coupling solver manages the iteration between sub-problems
+
+## Output Requirements
+
+The simulation should produce output that enables:
+- Visualization of proppant distribution profiles at various times (particularly at 10 seconds and 30 seconds)
+- Identification of three distinct zones: immobile proppant bed, suspended proppant, and clean fluid
+- Proppant concentration data for comparison with experimental results
+- Evolution of proppant distribution over the 30-second injection period
+
+## File Structure
+
+The configuration may be split across two XML files:
+1. A base file containing common definitions (material properties, boundary conditions)
+2. A benchmark file containing mesh and solver specifications
+
+Alternatively, everything can be contained within a single XML file. The file(s) should be organized with clear sections for Solvers, Mesh, Constitutive, and FieldSpecifications tags.

@@ -1,0 +1,179 @@
+# Natural Language Specification for CO2 Injection Simulation XML Configuration
+
+## Simulation Overview
+
+This configuration defines a multiphase compositional simulation of CO2 injection into a reservoir. The simulation models CO2 injection through a single well into a brine-saturated reservoir, capturing the two-phase (CO2-rich gas and brine) flow behavior, CO2 dissolution in brine, and buoyancy-driven plume migration.
+
+## Solver Configuration
+
+The simulation requires three coupled solvers:
+
+### Primary Solver: CompositionalMultiphaseReservoir
+This is the main coupling solver that binds the reservoir flow solver and well solver together. Configure it with:
+- References to the flow solver name and well solver name
+- An initial time step size value (specify using `initialDt` attribute)
+- NonlinearSolverParameters sub-block to control Newton iteration behavior
+- LinearSolverParameters sub-block configured to use the Hypre linear solver package
+
+### Reservoir Flow Solver: CompositionalMultiphaseFVM
+Configure a compositional multiphase flow solver using:
+- Finite Volume Method (FVM) discretization
+- Two-Point Flux Approximation (TPFA) scheme
+- References to the fluid model, relative permeability model, and permeability model
+
+### Well Solver: CompositionalMultiphaseWell
+Configure a compositional well solver with:
+- References to fluid and relative permeability models
+- A WellControls sub-block specifying:
+  - Control mode: initially rate-controlled
+  - Target total rate value (specify injection rate)
+  - Target BHP (maximum bottom-hole pressure limit)
+  - Injection stream composition: pure CO2 (100% CO2, 0% H2O)
+
+## Mesh Requirements
+
+### Reservoir Mesh
+Generate an internal regular grid mesh with the following dimensions:
+- 50 cells in the X direction
+- 1 cell in the Y direction  
+- 150 cells in the Z direction
+
+### Well Geometry (InternalWell)
+Configure an internal well specification with:
+- Well name identifier
+- Reference to the well region name
+- Reference to the well controls name
+- Polyline node coordinates defining the wellbore path (wellbore positioned at center of reservoir)
+- Polyline segment connectivity defining connections between wellbore nodes
+- Number of elements per segment for wellbore discretization
+- Wellbore radius value
+
+### Perforations
+Define perforation locations using:
+- Distance from well head parameter
+- Ensure at least one perforation exists in the bottom cell of the well mesh (required for simulation to run)
+
+## Element Regions
+
+Define two element regions:
+
+### CellElementRegion
+- Name for the reservoir region
+- Use "all" keyword to select all reservoir mesh cells
+- List of constitutive model names (fluid, relative permeability, rock compressibility, permeability)
+
+### WellElementRegion
+- Name for the well region
+- List of constitutive model names applicable to the well
+
+## Constitutive Models
+
+### Fluid Model: CO2BrinePhillipsFluid
+Configure the CO2-brine fluid model with:
+- Phase names (gas phase and liquid/brine phase)
+- Component names (CO2 and H2O)
+- Component molar weights
+- Reference to three external PVT text files:
+  - Flash/solubility file (co2flash.txt): Defines CO2 solubility model with pressure range (lower, upper, step in Pascals), temperature range (lower, upper, step in Kelvin), and salinity (in molality, can be zero)
+  - Gas PVT file (pvtgas.txt): Defines gas phase density and viscosity models (SpanWagnerCO2Density, FenghourCO2Viscosity) with pressure/temperature ranges
+  - Liquid PVT file (pvtliquid.txt): Defines brine density and viscosity models (PhillipsBrineDensity, PhillipsBrineViscosity) with pressure/temperature ranges and salinity
+
+### Rock Compressibility: PressurePorosity
+Configure pressure-dependent porosity model with rock compressibility parameters.
+
+### Relative Permeability: BrooksCoreyRelativePermeability
+Configure Brooks-Corey relative permeability model with:
+- Phase names
+- End-point relative permeability values for each phase
+- Residual volume fractions (residual saturations) for each phase
+- Corey exponents for each phase
+
+### Permeability Model: ConstantPermeability
+Configure a constant permeability model with:
+- Permeability components as a diagonal tensor (specify three values for x, y, z directions)
+- Note: These values will be overwritten by heterogeneous permeability field imported via FieldSpecifications
+
+## Numerical Methods
+
+### TwoPointFluxApproximation
+Configure TPFA discretization with:
+- Field name: pressure (primary field to solve for)
+- Target regions: list including both reservoir and well regions
+- Coefficient name: field used for transmissibility construction
+- Coefficient model names: reference to permeability constitutive model(s)
+
+## Field Specifications (Initial and Boundary Conditions)
+
+Define the following fields:
+
+### Permeability Field
+- Heterogeneous log-normally distributed permeability field
+- Specified via external file (perm.geos) referenced in Functions block
+- Apply to all three directional components (x, y, z) - same field used for all directions
+- Field name must be set to "rockPerm_permeability" to access the constitutive permeability field
+- These values overwrite the constitutive block values
+
+### Reference Porosity
+- Homogeneous reference porosity value for the reservoir
+
+### Initial Pressure
+- Homogeneous initial pressure field
+- Note: This example does not account for elevation/hydrostatic gradient - for more physical accuracy, consider using HydrostaticEquilibrium
+
+### Initial Compositions
+- Initial component fractions/compositions (initially pure brine - 100% H2O, 0% CO2)
+
+## Events Configuration
+
+### Solver Event (PeriodicEvent)
+- Target: the coupled flow and wells solver (coupledFlowAndWells)
+- Maximum event time step: 5 × 10^6 seconds
+
+### Output Event (PeriodicEvent)
+- Trigger VTK output every 10^7 seconds
+- Target: VTK output specification
+- This constrains solver to match output dates exactly
+
+### Restart Event (PeriodicEvent)
+- Name: "restarts"
+- Save checkpoint files every 5 × 10^7 seconds
+- Output folder specified in Output block
+
+### Time History Collection Event
+- Periodic event to trigger well pressure time series collection
+- Target: the time history collection task
+
+### Time History Output Event
+- Event to write collected time history data to file
+
+## Output Configuration
+
+### VTK Output
+- Format readable by Paraview
+- Specify output path/filename
+
+### Restart Output
+- Enable checkpoint file writing for simulation restart capability
+
+### TimeHistory Output
+- Output file for well pressure history data
+- Links to the PackCollection task
+
+## Tasks Configuration
+
+### PackCollection Task
+- Purpose: Periodically collect pressure data at the well
+- Object path: path to WellElementSubRegion
+- Field name: "pressure"
+- This task is triggered by the time history collection event
+
+## Functions Configuration
+
+Define a table function to import the heterogeneous permeability field from external file (perm.geos).
+
+## Execution Notes
+
+- The simulation is designed to run with MPI parallelism (example uses 4 cores)
+- Domain decomposition can be specified (example uses 2×1×2 in x, y, z directions)
+- Requires GEOS configured with Hypre linear solver package
+- Ensure PVT file pressure/temperature bounds cover all values encountered in simulation (reservoir and well) - out-of-bounds values will not error but may cause poor convergence and results

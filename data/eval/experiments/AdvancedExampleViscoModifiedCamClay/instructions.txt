@@ -1,0 +1,103 @@
+# Natural Language Specification for Visco Modified CamClay Triaxial Driver Validation Example
+
+## 1. Simulation Type and Physical Problem Overview
+
+This simulation models a visco-elasto-plastic oedometric compression test using the Triaxial Driver solver in GEOS. The physical problem involves a Visco Modified Cam-Clay solid material subjected to oedometric boundary conditions, which means zero lateral strain is enforced while axial strain loading and unloading periods are imposed. This is a validation study designed to compare GEOS numerical results against semi-analytical solutions derived from the Perzyna viscoplasticity approach.
+
+The Triaxial Driver is a specialized solver that simulates stress-strain behavior at a material point level, making it ideal for constitutive model validation without requiring a full mesh-based simulation.
+
+## 2. Solver Configuration
+
+The simulation requires a Triaxial Driver task configuration with the following specifications:
+
+- **Solver Type**: TriaxialDriver
+- **Loading Protocol**: The driver must impose axial strain with distinct loading and unloading periods
+- **Lateral Constraints**: Zero lateral strain must be enforced (oedometric condition)
+- **Initial Stress State**: An initial stress condition must be specified as a starting point for the loading path
+- **Time Integration**: The simulation involves time-dependent viscoplastic behavior, so appropriate time stepping must be defined with time increments (Δt) that interact with the material's relaxation time
+
+The configuration should reference table files located in a tables subdirectory that define the strain loading history over time.
+
+## 3. Mesh Requirements
+
+As this example uses the Triaxial Driver, which operates at a single material point level, no spatial mesh discretization is required. The Triaxial Driver internally handles the stress-strain calculations for a representative material element without the need for:
+- Mesh dimensions
+- Cell sizes
+- Element types
+- Node connectivity
+
+This is a material point simulation, not a boundary value problem.
+
+## 4. Material Properties and Constitutive Model
+
+The constitutive model is a **Visco Modified Cam-Clay** material, which is an elasto-visco-plastic model. The following material parameters must be specified in SI units (International System of Units):
+
+### Elastic Parameters:
+- **Bulk Modulus (K)**: Defines the volumetric elastic stiffness
+- **Shear Modulus (μ)**: Defines the deviatoric elastic stiffness
+
+### Viscoplastic Parameters:
+- **Density**: Material mass density
+- **Viscosity/Relaxation Time (t*)**: Controls the rate-dependent viscoplastic response; this parameter governs how quickly the material approaches the rate-independent yield surface
+- **Pre-consolidation Pressure**: Initial yield surface size parameter for the Cam-Clay model
+- **Slope of Critical State Line (M)**: Defines the critical state friction angle
+- **Virgin Compression Index (λ)**: Slope of the normal consolidation line in e-ln(p) space
+- **Swelling/Recompression Index (κ)**: Slope of the unloading-reloading line in e-ln(p) space
+- **Initial Void Ratio**: Starting porosity state of the material
+
+The constitutive model should be named appropriately (such as "rock" or similar) and referenced in the Task block.
+
+## 5. Initial and Boundary Conditions
+
+### Initial Conditions:
+- **Initial Stress State**: A non-zero initial mean stress (p) must be specified to position the material on the yield surface or within the elastic domain
+- The initial stress should be consistent with the pre-consolidation pressure to establish the initial over-consolidation ratio
+
+### Boundary Conditions (applied through Triaxial Driver):
+- **Axial Direction**: Strain-controlled loading with prescribed axial strain history that includes:
+  - Loading phase(s) with increasing compressive axial strain
+  - Unloading phase(s) with decreasing axial strain
+- **Lateral Directions**: Zero strain constraint (εradial = 0) to simulate oedometric conditions
+- The strain history should be provided through external table files
+
+## 6. Numerical Method Specifications
+
+### Time Stepping:
+- The simulation requires time-dependent analysis due to the viscoplastic nature of the material
+- Time increments (Δt) should be specified consistent with the relaxation time (t*) to capture rate-dependent behavior accurately
+- The loading/unloading periods should be discretized with sufficient temporal resolution
+
+### Viscoplastic Algorithm:
+- GEOS uses the Duvaut-Lions approach for viscoplasticity (as noted in the documentation, this differs from the Perzyna approach used in the semi-analytical comparison)
+- The viscoplastic multiplier calculation involves the yield function F, plastic potential G, and hardening modulus h
+
+### Convergence:
+- Standard constitutive integration tolerances should be applied for the stress update algorithm
+
+## 7. Output Requirements
+
+### Primary Output:
+- Results must be written to a text file named **ViscoModifiedCamClayResults.txt**
+- This file should contain the stress-strain history from the simulation
+
+### Output Variables:
+The output should include at minimum:
+- Time history
+- Axial strain (ε₁₁ or εaxial)
+- Mean stress/pressure (p)
+- Deviatoric/shear stress (q)
+- Volumetric strain (εv) if applicable
+- Any internal state variables (pre-consolidation pressure evolution, plastic strain)
+
+### Post-Processing:
+The results are intended for comparison with semi-analytical solutions computed via an external Python script, so the output format should be easily parseable (columns of numerical data).
+
+## 8. File Structure Requirements
+
+The XML configuration should be organized as either:
+- A single comprehensive XML file, or
+- A split structure with:
+  - A base XML file containing common parameters and material definitions
+  - A case-specific XML file that includes the base file and adds Task-specific configurations
+
+External table files should be referenced for the strain loading history, stored in a `tables/` subdirectory relative to the input file location.

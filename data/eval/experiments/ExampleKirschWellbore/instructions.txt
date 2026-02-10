@@ -1,0 +1,137 @@
+# Natural Language Specification for Kirsch Wellbore Problem XML Configuration
+
+## Overview and Simulation Type
+
+Create an XML configuration file for a three-dimensional vertical elastic wellbore simulation known as the Kirsch Wellbore Problem. This is a solid mechanics problem that models a drained wellbore subjected to anisotropic in-situ horizontal stresses and internal wellbore pressure. The simulation computes the elastic deformation and stress concentration in the near-wellbore region of an infinite, homogeneous, isotropic, elastic medium. A plane strain condition should be applied. The purpose is to verify numerical results against the analytical Kirsch solution for stress and displacement fields around a circular cavity.
+
+## Solver Configuration
+
+### Primary Solver
+Configure a solid mechanics solver using the Lagrangian finite element formulation (SolidMechanicsLagrangianFEM). The solver should be named "mechanicsSolver" and configured for quasi-static analysis, meaning inertial effects are not considered. Since this is a drained wellbore problem, pore pressure variations are omitted and only mechanical deformation is solved.
+
+### Solver Parameters
+- Solver type: SolidMechanicsLagrangianFEM
+- Solver name: mechanicsSolver
+- Problem type: QuasiStatic
+- Discretization method: Reference a finite element discretization named "FE1"
+- Target region material: Reference material named "rock"
+
+## Numerical Methods
+
+Define a finite element discretization in the NumericalMethods section. Create a discretization scheme named "FE1" that will be referenced by the solid mechanics solver. This discretization should be compatible with eight-node hexahedral elements (C3D8).
+
+## Mesh Specification
+
+### Mesh Generator
+Use the internal wellbore mesh generator (InternalWellbore) to create the computational domain.
+
+### Domain Dimensions
+- Total domain size: 10 meters × 5 meters × 2 meters (radial extent × width × height)
+- Initial wellbore radius (a₀): 0.1 meters
+
+### Angular Configuration
+- Theta angle range: 0 to 180 degrees
+- This models half of the wellbore domain, assuming symmetry for the remaining portion
+
+### Wellbore Trajectory
+Define the trajectory coordinates to create a vertical wellbore (the wellbore axis aligned with the z-direction).
+
+### Mesh Refinement Settings
+- Enable automatic radial element spacing by setting autoSpaceRadialElems to "{1}" - this automatically determines the number and spacing of elements in the radial direction, overriding manual nr values
+- Set useCartesianOuterBoundary to "0" to enforce a Cartesian-aligned boundary condition on the outer blocks
+
+### Element Configuration
+- Total elements: 50 elements in radial direction × 40 elements in tangential direction × 2 elements in z-direction
+- Element type: Eight-node hexahedral elements (C3D8)
+- The mesh should include refinement to conform with the wellbore geometry
+- Define the mesh as a cell block named "cb1"
+
+## Constitutive Models and Material Properties
+
+### Material Model
+Use an isotropic linear elastic constitutive model (ElasticIsotropic) to simulate the mechanical behavior of the rock.
+
+### Material Name
+Name the material "rock" to match the reference in the solver configuration.
+
+### Material Properties (in SI Units - International System of Units)
+- Bulk Modulus (K): 500.0 MPa (500.0e6 Pa)
+- Shear Modulus (G): 300.0 MPa (300.0e6 Pa)
+- Density: Specify an appropriate rock density value in kg/m³
+
+## Initial Conditions
+
+All initial condition fields must have the initialCondition attribute set to "1".
+
+### Initial Stress State
+Apply anisotropic in-situ stresses throughout the domain:
+- Minimum horizontal stress (σyy): -9.0 MPa (-9.0e6 Pa)
+- Maximum horizontal stress (σxx): -11.25 MPa (-11.25e6 Pa)
+- Vertical stress (σzz): -15.0 MPa (-15.0e6 Pa)
+
+Note: Negative values indicate compressive stresses following GEOS sign convention.
+
+## Boundary Conditions
+
+### Wellbore Wall Loading
+- Apply a normal traction named "WellLoad" on the wellbore wall surface (identified as "rneg")
+- Traction type: "normal"
+- Magnitude (Pw): -2.0 MPa (scale value: -2.0e6 Pa)
+- The traction is computed as the scalar product of the scale value and the outward face normal vector
+- This represents a compressive mud pressure or internal supporting pressure
+- The loading magnitude remains constant with time
+
+### Outer Boundary Constraints
+Apply roller constraints (zero displacement normal to the boundary) on the remaining outer boundaries:
+- xneg: Left-most face in x-direction
+- xpos: Right-most face in x-direction
+- yneg: Bottom face in y-direction
+- ypos: Top face in y-direction
+- zneg: Back face in z-direction
+- zpos: Front face in z-direction
+
+### Field Specification Notes
+- Use objectPath "nodeManager" for displacement boundary conditions applied to element nodes
+- Use objectPath "faceManager" for traction boundary conditions applied to element faces
+- Component indices: 0 = x-direction, 1 = y-direction, 2 = z-direction
+- Use fieldName to reference registered GEOS fields
+
+## Output Requirements
+
+### VTK Output
+Configure VTK output files for visualization in Paraview to display stress distributions (particularly σxx) in the near-wellbore region.
+
+### Time History Output
+Configure the Tasks section with PackCollection tasks to collect time history information:
+
+1. **Stress Collection Task**
+   - Task name: stressCollection
+   - Collect the "averageStress" field
+   - This outputs a tensor stored as an array with Voigt notation (6 components per cell)
+   - The averageStress represents cell-wise average of each stress component calculated using finite element quadrature rule
+
+2. **Displacement Collection Task**
+   - Task name: displacementCollection
+   - Collect the "totalDisplacement" field
+   - This outputs a 3-component vector representing the displacement field
+
+### Events Configuration
+Define PeriodicEvent entries in the Events section to trigger the stress and displacement collection tasks at recurring intervals.
+
+### Output Files
+Configure output to generate HDF5 formatted files:
+- displacement_history.hdf5
+- stress_history.hdf5
+
+These files should contain datasets for:
+- Simulation time
+- Element center or nodal positions
+- The collected time history information for stress and displacement fields
+
+## File Structure
+
+The configuration should be structured to potentially use two files:
+1. A base configuration file containing solver, constitutive, field specifications, and tasks
+2. A benchmark configuration file containing the mesh definition
+
+The benchmark file can include or reference the base file to create the complete simulation setup.

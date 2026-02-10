@@ -1,0 +1,173 @@
+# Natural Language Specification for CO2 Plume Evolution with Hysteresis Effect Simulation
+
+## Overview and Simulation Type
+
+This XML configuration file defines a compositional multiphase flow simulation for CO2 storage in a geological formation, specifically modeling the Johansen reservoir benchmark case from Class et al. (2009). The simulation captures solubility trapping through CO2 dissolution in brine and residual trapping through gas relative permeability hysteresis in a CO2-brine system. The simulation runs for a total of 50 years, with CO2 injection occurring during the first 25 years.
+
+## Solver Configuration
+
+### Coupled Solver
+Create a **CompositionalMultiphaseReservoir** coupled solver that references two sub-solvers: a flow solver and a well solver. This coupled solver must include:
+- A reference to the flow solver named "compositionalMultiphaseFlow"
+- A reference to the well solver named "compositionalMultiphaseWell"
+- Nonlinear solver parameters block
+- Linear solver parameters block
+
+### Flow Solver
+Define a **CompositionalMultiphaseFVM** solver with the name "compositionalMultiphaseFlow" that:
+- Targets the reservoir region
+- Uses TPFA (Two-Point Flux Approximation) discretization scheme
+- The discretization definition should be nested within the NumericalMethods/FiniteVolume section
+
+### Well Solver
+Create a **CompositionalMultiphaseWell** solver that:
+- Targets the "wellRegion"
+- References well controls for the injection well
+- Includes control parameters for injection type, injection stream composition, injection temperature, target total rate (via a table function), and target bottom-hole pressure (BHP)
+
+## Mesh and Element Regions
+
+### Mesh Specification
+- Import an external mesh using the meshImport capability
+- The mesh discretizes the Johansen reservoir with domain dimensions of 9600 meters by 8900 meters by 90-140 meters (variable thickness due to tilted geometry with a main fault)
+- The mesh uses a fully hexahedral conforming discretization (structured mesh)
+- Apply a VTK PointToCell filter to map porosity and permeability properties from vertices to cell centers using uniform averaging
+- Both porosity and permeability are heterogeneous fields provided in the mesh
+
+### Element Regions
+Define two element regions:
+1. A reservoir region named "reservoir" for the geological formation
+2. A well region named "wellRegion" for the injection wellbore
+- The well is discretized internally by GEOS into five segments, each containing one perforation
+- All regions must specify their associated material constitutive models
+
+## Well Configuration
+
+Define a single CO2 injection well with the following specifications:
+- Location at coordinates (x, y) = (5440, 3300) meters
+- Perforations located only in the bottom 50 meters of the reservoir
+- Five well segments, each with one perforation
+- Well controls specifying:
+  - Injection type operation
+  - Injection stream composition (pure CO2)
+  - Injection temperature
+  - Target total rate defined via a table function (rate of 15 kg/s during injection period)
+  - Target BHP as a constraint
+
+## Constitutive Models and Material Properties
+
+### Fluid Model
+Create a **CO2BrineEzrokhiFluid** model that defines:
+- Two phases: "gas" (CO2-rich phase) and "water" (aqueous phase)
+- Two components: "co2" and "water"
+- CO2 miscibility (CO2 can dissolve in the aqueous phase)
+- H2O vaporization in the gas phase is not modeled
+- Reference external PVT table files:
+  - "tables/pvtgas.txt" for gas phase density and viscosity
+  - "tables/pvtliquid_ex.txt" for brine density and viscosity
+  - "tables/co2flash.txt" for CO2 solubility model
+- These tables provide pressure, temperature, and salinity discretization of the parameter space
+
+### Rock Model
+Define a rock constitutive model for a slightly compressible porous medium with:
+- Reference porosity value of 0.1
+- Compressibility parameters appropriate for the formation
+
+### Relative Permeability
+For the drainage-only (non-hysteretic) case:
+- Use a **TableRelativePermeability** model
+- Define relative permeability curves via table names using the attribute "wettingNonWettingRelPermTableNames"
+- Reference TableFunction definitions in the Functions block for piecewise linear interpolation
+
+For the hysteresis case:
+- Use a **TableRelativePermeabilityHysteresis** model
+- Define imbibition curve for the non-wetting phase using "imbibitionNonWettingRelPermTableName"
+- Define imbibition curve for the wetting phase using "imbibitionWettingRelPermTableName"
+- Define drainage curves using "drainageWettingNonWettingRelPermTableNames" (identical to the drainage-only curves)
+- All curves reference TableFunction blocks in the Functions section
+
+### Capillary Pressure
+Create a **TableCapillaryPressure** model:
+- Define tabulated capillary pressure data
+- No hysteresis is applied to capillary pressure
+
+## Initial and Boundary Conditions
+
+### Initial Conditions
+Use **HydrostaticEquilibrium** specification in the FieldSpecifications block:
+- Set datum pressure and datum elevation according to the Class et al. (2009) benchmark values
+- The domain is initially fully saturated with brine
+
+Define TableFunction blocks in the Functions section:
+- "initCO2CompFracTable" - defines initial CO2 component fraction (zero for brine-saturated state)
+- "initWaterCompFracTable" - defines initial water component fraction (fully brine-saturated)
+- "initTempTable" - defines temperature as a function of depth to impose the geothermal gradient
+
+### Boundary Conditions
+Apply boundary conditions to the lateral faces of the domain:
+- Constant hydrostatic pressure gradient maintained throughout the simulation (equal to initial conditions)
+- Constant geothermal temperature gradient of 0.03 K/m
+- Water-dominant composition at boundaries
+- Apply using objectPath set to "faceManager" to target boundary faces
+- Link each field (pressure, temperature, composition) to appropriate TableFunction definitions via the "functionName" attribute
+
+### Key Assumptions Encoded
+- Formation is isotropic
+- Temperature remains constant in time (no thermal evolution)
+- Lateral boundary pressures remain constant and equal to initial hydrostatic conditions
+
+## Numerical Methods
+
+Define a FiniteVolume discretization block within NumericalMethods:
+- Use TPFA (Two-Point Flux Approximation) scheme
+- This discretization is referenced by the flow solver
+
+## Time Stepping and Events
+
+Configure the simulation timeline:
+- Total simulation duration: 50 years
+- Injection period: first 25 years
+- Post-injection monitoring: remaining 25 years
+- Define events for:
+  - Solver execution
+  - Statistics output (periodic, controlled by forceDt parameter)
+  - VTK output
+
+## Output Requirements
+
+### Reservoir Statistics
+Create a **Task** for computing and outputting reservoir statistics:
+- Set "flowSolverName" to point to the compositional flow solver
+- Set "computeRegionStatistics" to 1 to compute statistics by region
+- Set "setNames" to 3 (corresponding to the mesh attribute tag)
+
+Create a periodic **Event** for statistics output:
+- Use "forceDt" to specify the output period
+- Set "target" to reference the statistics task
+
+The statistics output will include:
+- Pressure (min, average, max) in Pa
+- Delta pressure (min, max) in Pa
+- Temperature (min, average, max) in K
+- Total dynamic pore volume in rm³
+- Phase dynamic pore volumes in rm³
+- Phase mass (including trapped and non-trapped) in kg
+- Trapped phase mass in kg
+- Dissolved component mass in kg
+- Phase and component CFL numbers
+
+### Visualization Output
+Configure VTK format output in the Outputs block:
+- Enable output of CO2 saturation field
+- Enable output of CO2 mass distribution
+- Enable output of gas phase relative permeability (to identify immobile CO2 where relative permeability drops below 1e-7)
+
+## Functions Block
+
+Define multiple TableFunction entries for piecewise linear interpolation:
+- Initial composition tables (CO2 and water component fractions)
+- Initial temperature table (function of depth for geothermal gradient)
+- Relative permeability tables for both drainage and imbibition curves
+- Capillary pressure tables
+- Injection rate table (15 kg/s for first 25 years, then zero)
+- Boundary condition tables for pressure, temperature, and composition as functions of spatial coordinates
