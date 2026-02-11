@@ -52,6 +52,9 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import statistics
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Import from other eval scripts
 sys.path.insert(0, str(Path(__file__).parent))

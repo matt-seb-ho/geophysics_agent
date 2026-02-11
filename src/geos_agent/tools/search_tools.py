@@ -173,21 +173,47 @@ class SearchTechnicalTool(Tool):
 
     def run(self, query: str, n_results: int = 5) -> Dict[str, Any]:
         try:
+            # Check for exclusion criteria (RAG contamination prevention)
+            excluded_dir = os.environ.get("EXCLUDED_EXAMPLE_DIR", "").lower().strip()
+
             results = self.collection.query(
                 query_texts=[query],
-                n_results=n_results,
+                n_results=n_results * 2 if excluded_dir else n_results,
             )
 
             formatted = []
+            count = 0
             for i, doc in enumerate(results["documents"][0]):
+                if count >= n_results:
+                    break
+
                 meta = results["metadatas"][0][i]
+                xml_ref = meta.get("xml_reference", "")
+                source_path = meta.get("source_path", "")
+                is_excluded = False
+
+                # RAG Contamination Filtering: check xml_reference and source_path
+                if excluded_dir and (xml_ref or source_path):
+                    try:
+                        for check_path in (xml_ref, source_path):
+                            if check_path:
+                                p = Path(check_path)
+                                if excluded_dir in str(p.parent).lower():
+                                    is_excluded = True
+                                    break
+                    except Exception:
+                        pass
+
                 formatted.append({
                     "title": meta["title"],
-                    "xml_reference": meta.get("xml_reference", ""),
+                    "xml_reference": None if is_excluded else xml_ref,
                     "line_range": meta.get("line_range", ""),
                     "breadcrumbs": meta["breadcrumbs"],
+                    "source_path": source_path,
                     "shadow_text": doc[:300] + "..." if len(doc) > 300 else doc,
+                    "is_excluded": is_excluded,
                 })
+                count += 1
 
             return {
                 "query": query,

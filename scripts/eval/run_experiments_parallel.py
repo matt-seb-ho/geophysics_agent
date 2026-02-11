@@ -26,11 +26,23 @@ Usage:
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 from datetime import datetime
 from typing import List, Tuple
 import subprocess
+
+
+DEFAULT_EVAL_PREAMBLE = """\
+You are being evaluated on your ability to author GEOS XML input files from \
+a natural language specification. Use the documentation search tools \
+(search_navigator, search_technical, fetch_code) to learn GEOS XML syntax \
+and patterns, then author the configuration files yourself. If a tool blocks \
+access to a file, move on and rely on documentation search instead.
+
+--- BEGIN SIMULATION SPECIFICATION ---
+"""
 
 
 # Colors for terminal output
@@ -61,7 +73,8 @@ async def run_experiment(
     max_retries: int,
     retry_delay: float,
     retry_backoff: float,
-    jsonl_log_dir: Path = None
+    jsonl_log_dir: Path = None,
+    eval_preamble: str = None,
 ) -> Tuple[str, bool, float]:
     """
     Run a single experiment and return results.
@@ -77,6 +90,7 @@ async def run_experiment(
         retry_delay: Initial delay between retries
         retry_backoff: Exponential backoff multiplier
         jsonl_log_dir: Optional directory for JSONL conversation logs
+        eval_preamble: Optional text prepended to instructions for eval isolation
 
     Returns:
         Tuple of (experiment_name, success, duration_seconds)
@@ -93,8 +107,10 @@ async def run_experiment(
             print(f"{Colors.FAIL}✗ {experiment_name}: {error_msg}{Colors.ENDC}")
             return (experiment_name, False, 0.0)
 
-        # Read instructions
+        # Read instructions and optionally prepend eval preamble
         instructions = instructions_file.read_text().strip()
+        if eval_preamble:
+            instructions = eval_preamble.strip() + "\n\n" + instructions
 
         # Prepare command
         cmd = [
@@ -130,12 +146,17 @@ async def run_experiment(
                 f.write(f"{'='*80}\n\n")
                 f.flush()
 
+                # Build environment with EXCLUDED_EXAMPLE_DIR for RAG contamination prevention
+                env = os.environ.copy()
+                env["EXCLUDED_EXAMPLE_DIR"] = experiment_name
+
                 # Run process
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=f,
                     stderr=subprocess.STDOUT,
-                    cwd=get_project_root()
+                    cwd=get_project_root(),
+                    env=env,
                 )
 
                 returncode = await process.wait()
@@ -182,7 +203,8 @@ async def run_all_experiments(
     retry_delay: float,
     retry_backoff: float,
     jsonl_log_dir: Path = None,
-    experiment_filter: List[str] = None
+    experiment_filter: List[str] = None,
+    eval_preamble: str = None,
 ):
     """
     Run all experiments concurrently with limited parallelism.
@@ -198,6 +220,7 @@ async def run_all_experiments(
         retry_backoff: Exponential backoff multiplier
         jsonl_log_dir: Optional directory for JSONL conversation logs
         experiment_filter: Optional list of experiment names to run
+        eval_preamble: Optional text prepended to instructions for eval isolation
     """
     # Find all experiment directories
     experiment_dirs = [
@@ -229,7 +252,7 @@ async def run_all_experiments(
         run_experiment(
             exp_dir, log_dir, semaphore, exp_dir.name,
             model, max_steps, max_retries, retry_delay, retry_backoff,
-            jsonl_log_dir
+            jsonl_log_dir, eval_preamble,
         )
         for exp_dir in experiment_dirs
     ]
@@ -346,6 +369,19 @@ def main():
         help="Exponential backoff multiplier for retry delays (default: 2.0)"
     )
 
+    # Eval isolation settings
+    parser.add_argument(
+        "--no-eval-preamble",
+        action="store_true",
+        help="Disable the default eval preamble that prevents GT leakage via instructions"
+    )
+    parser.add_argument(
+        "--eval-preamble",
+        type=str,
+        default=None,
+        help="Custom eval preamble text (overrides the default)"
+    )
+
     args = parser.parse_args()
 
     # Set up paths
@@ -363,6 +399,14 @@ def main():
     if args.jsonl_log_dir:
         args.jsonl_log_dir.mkdir(parents=True, exist_ok=True)
 
+    # Resolve eval preamble
+    if args.no_eval_preamble:
+        eval_preamble = None
+    elif args.eval_preamble:
+        eval_preamble = args.eval_preamble
+    else:
+        eval_preamble = DEFAULT_EVAL_PREAMBLE
+
     # Run experiments
     asyncio.run(run_all_experiments(
         experiments_dir=experiments_dir,
@@ -374,7 +418,8 @@ def main():
         retry_delay=args.retry_delay,
         retry_backoff=args.retry_backoff,
         jsonl_log_dir=args.jsonl_log_dir,
-        experiment_filter=args.experiments
+        experiment_filter=args.experiments,
+        eval_preamble=eval_preamble,
     ))
 
 

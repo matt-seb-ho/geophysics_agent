@@ -44,26 +44,112 @@ class Colors:
 
 def parse_jsonl_log(log_path: Path) -> List[Dict[str, Any]]:
     """
-    Parse a JSONL log file into a list of event records.
+    Parse a conversation log file into a list of event records.
+
+    Supports two formats:
+    1. JSON: Single object with {tool_calls, tool_responses, ...} (agent conversation log)
+    2. JSONL: One JSON object per line (legacy event-based format)
+
+    In JSON mode, tool_calls and tool_responses are paired and converted into
+    event records compatible with the metrics computation functions.
 
     Args:
-        log_path: Path to JSONL log file
+        log_path: Path to log file (JSON or JSONL)
 
     Returns:
         List of event dictionaries
     """
+    raw = log_path.read_text(encoding='utf-8')
+
+    # Try loading as a single JSON object first (conversation log format)
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict) and "tool_calls" in data:
+            return _convert_json_log_to_events(data)
+    except json.JSONDecodeError:
+        pass
+
+    # Fall back to line-by-line JSONL
     events = []
-    with open(log_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-                events.append(event)
-            except json.JSONDecodeError as e:
-                print(f"Warning: Failed to parse line in {log_path}: {e}")
-                continue
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+            events.append(event)
+        except json.JSONDecodeError as e:
+            print(f"Warning: Failed to parse line in {log_path}: {e}")
+            continue
+    return events
+
+
+def _convert_json_log_to_events(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Convert a conversation log JSON object into event records.
+
+    Pairs tool_calls with tool_responses by ID and determines success/failure
+    by inspecting the response content.
+
+    Args:
+        data: Conversation log dict with tool_calls and tool_responses
+
+    Returns:
+        List of event dicts with keys: event, tool, args, result_preview, error
+    """
+    tool_calls = data.get("tool_calls", [])
+    tool_responses = data.get("tool_responses", [])
+
+    # Index responses by tool_call_id for fast lookup
+    response_by_id = {}
+    for tr in tool_responses:
+        tc_id = tr.get("tool_call_id")
+        if tc_id:
+            response_by_id[tc_id] = tr.get("content", "")
+
+    events = []
+    for tc in tool_calls:
+        tc_id = tc.get("id")
+        tool_name = tc.get("tool_name", "unknown")
+        args_raw = tc.get("arguments", "{}")
+
+        # Parse arguments
+        try:
+            args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+        except json.JSONDecodeError:
+            args = {"raw": args_raw}
+
+        # Get paired response content
+        content = response_by_id.get(tc_id, "")
+
+        # Determine success or failure from response content
+        is_error = False
+        error_msg = ""
+        try:
+            parsed = json.loads(content) if isinstance(content, str) else content
+            if isinstance(parsed, dict) and "error" in parsed:
+                is_error = True
+                error_msg = parsed["error"]
+        except (json.JSONDecodeError, TypeError):
+            # Non-JSON content; check for error prefixes
+            if isinstance(content, str) and content.strip().lower().startswith("error"):
+                is_error = True
+                error_msg = content[:200]
+
+        event = {
+            "tool": tool_name,
+            "args": args,
+            "result_preview": content,
+        }
+
+        if is_error:
+            event["event"] = "tool_run_error"
+            event["error"] = error_msg
+        else:
+            event["event"] = "tool_run_ok"
+
+        events.append(event)
+
     return events
 
 
@@ -150,6 +236,10 @@ def extract_search_results(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     """
     Extract search results from tool execution events.
 
+    Handles the actual search tool output format where results are under the
+    "results" key (not "chunks"). Each result item contains fields like
+    title, source/source_path, breadcrumbs, etc.
+
     Args:
         events: List of log event dictionaries
 
@@ -169,28 +259,23 @@ def extract_search_results(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]
         if tool_name not in ["search_navigator", "search_technical"]:
             continue
 
-        # Parse the result to extract chunk metadata
+        # Parse the result to extract search results
         result_preview = event.get("result_preview", "")
 
-        # Try to parse as JSON (the result should be JSON)
         try:
-            # The result_preview might be truncated, so also try to reconstruct
-            # from the actual tool output if available
-            result_obj = json.loads(result_preview)
+            result_obj = json.loads(result_preview) if isinstance(result_preview, str) else result_preview
 
-            # Extract chunks if present
-            if isinstance(result_obj, dict) and "chunks" in result_obj:
-                chunks = result_obj["chunks"]
+            if isinstance(result_obj, dict) and "results" in result_obj:
+                results = result_obj["results"]
 
                 search_results.append({
                     "tool": tool_name,
-                    "query": event.get("args", {}).get("query", ""),
-                    "num_chunks": len(chunks),
-                    "chunks": chunks
+                    "query": result_obj.get("query", event.get("args", {}).get("query", "")),
+                    "num_results": len(results),
+                    "results": results,
                 })
 
-        except json.JSONDecodeError:
-            # Result might be truncated or not JSON
+        except (json.JSONDecodeError, TypeError):
             continue
 
     return search_results
@@ -203,52 +288,45 @@ def compute_rag_retrieval_metrics(
     """
     Compute RAG retrieval accuracy metrics.
 
-    Measures how often the agent retrieves chunks from the expected source document.
+    Measures how often the agent retrieves results from the expected source document.
+
+    Source path is extracted from result items using:
+    - "source" key (SearchNavigatorTool format)
+    - "source_path" key (SearchTechnicalTool format)
 
     Args:
         events: List of log event dictionaries
         expected_source_path: Expected RST source path (e.g., "src/docs/sphinx/.../Example.rst")
 
     Returns:
-        Dictionary with retrieval metrics:
-        {
-            "total_searches": int,
-            "total_chunks_retrieved": int,
-            "relevant_chunks": int,
-            "relevant_chunk_rate": float,
-            "searches_with_relevant": int,
-            "search_relevance_rate": float,
-            "relevant_chunks_by_tool": {tool_name: count},
-            "total_chunks_by_tool": {tool_name: count}
-        }
+        Dictionary with retrieval metrics
     """
     search_results = extract_search_results(events)
 
     total_searches = len(search_results)
-    total_chunks = 0
-    relevant_chunks = 0
+    total_results = 0
+    relevant_results = 0
     searches_with_relevant = 0
     relevant_by_tool = Counter()
     total_by_tool = Counter()
 
     for search in search_results:
         tool = search["tool"]
-        chunks = search["chunks"]
-        num_chunks = len(chunks)
+        results = search["results"]
+        num_results = len(results)
 
-        total_chunks += num_chunks
-        total_by_tool[tool] += num_chunks
+        total_results += num_results
+        total_by_tool[tool] += num_results
 
-        # Count relevant chunks (matching source_path)
+        # Count relevant results (matching source_path)
         search_has_relevant = False
 
-        for chunk in chunks:
-            # Check if metadata contains the expected source_path
-            metadata = chunk.get("metadata", {})
-            source_path = metadata.get("source_path", "")
+        for result in results:
+            # Navigator uses "source", technical uses "source_path"
+            source_path = result.get("source") or result.get("source_path", "")
 
             if source_path == expected_source_path:
-                relevant_chunks += 1
+                relevant_results += 1
                 relevant_by_tool[tool] += 1
                 search_has_relevant = True
 
@@ -258,9 +336,9 @@ def compute_rag_retrieval_metrics(
     return {
         "expected_source_path": expected_source_path,
         "total_searches": total_searches,
-        "total_chunks_retrieved": total_chunks,
-        "relevant_chunks": relevant_chunks,
-        "relevant_chunk_rate": relevant_chunks / total_chunks if total_chunks > 0 else 0.0,
+        "total_chunks_retrieved": total_results,
+        "relevant_chunks": relevant_results,
+        "relevant_chunk_rate": relevant_results / total_results if total_results > 0 else 0.0,
         "searches_with_relevant": searches_with_relevant,
         "search_relevance_rate": searches_with_relevant / total_searches if total_searches > 0 else 0.0,
         "relevant_chunks_by_tool": dict(relevant_by_tool),

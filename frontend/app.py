@@ -211,6 +211,21 @@ def _render_parts(parts: list) -> None:
             choices = part.get("choices")
             if choices:
                 st.markdown("Choices: " + ", ".join(f"`{c}`" for c in choices))
+        elif ptype == "image":
+            file_path = part["path"]
+            if os.path.isfile(file_path):
+                st.image(file_path, caption=part.get("caption", ""))
+        elif ptype == "dataframe":
+            import pandas as pd
+
+            file_path = part["path"]
+            if os.path.isfile(file_path):
+                try:
+                    df = pd.read_csv(file_path)
+                    st.caption(part.get("caption", ""))
+                    st.dataframe(df, use_container_width=True)
+                except Exception:
+                    pass
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +306,14 @@ if prompt := st.chat_input(_chat_placeholder):
 
     # ---- Determine whether this is a fresh step or a resume ----
     is_resume = st.session_state.pending_input is not None
+
+    # ---- Snapshot output files so we can detect new ones after the turn ----
+    _outputs_dir = Path(st.session_state.workspace_path) / "outputs"
+    _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".svg", ".webp"}
+    _TABLE_EXTS = {".csv"}
+    _pre_existing: set[str] = set()
+    if _outputs_dir.is_dir():
+        _pre_existing = {str(p) for p in _outputs_dir.rglob("*") if p.is_file()}
 
     # ---- Streaming state (mutable via closures) ----
     _parts: list = []
@@ -422,6 +445,30 @@ if prompt := st.chat_input(_chat_placeholder):
             _finalize_text()
             container.error(f"Error: {e}")
             _parts.append({"type": "error", "content": str(e)})
+
+    # ---- Display new output files (images, tables) created this turn ----
+    if _outputs_dir.is_dir():
+        new_files = sorted(
+            p for p in _outputs_dir.rglob("*")
+            if p.is_file() and str(p) not in _pre_existing
+        )
+        for fpath in new_files:
+            caption = fpath.name
+            if fpath.suffix.lower() in _IMAGE_EXTS:
+                with st.chat_message("assistant"):
+                    st.image(str(fpath), caption=caption)
+                _parts.append({"type": "image", "path": str(fpath), "caption": caption})
+            elif fpath.suffix.lower() in _TABLE_EXTS:
+                import pandas as pd
+
+                try:
+                    df = pd.read_csv(fpath)
+                    with st.chat_message("assistant"):
+                        st.caption(caption)
+                        st.dataframe(df, use_container_width=True)
+                    _parts.append({"type": "dataframe", "path": str(fpath), "caption": caption})
+                except Exception:
+                    pass
 
     # ---- Persist assistant message ----
     st.session_state.messages.append({"role": "assistant", "parts": _parts})

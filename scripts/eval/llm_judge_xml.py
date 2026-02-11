@@ -29,7 +29,10 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, Any, Optional
 import os
+from dotenv import load_dotenv
 from openai import OpenAI
+
+load_dotenv()
 
 
 def resolve_xml_imports(xml_path: Path, base_dir: Optional[Path] = None) -> str:
