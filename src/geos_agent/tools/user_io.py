@@ -1,14 +1,38 @@
 # geos_agent/tools/user_io.py
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from geos_agent.tools.base import Tool
+
+
+class UserInputRequired(Exception):
+    """Raised by IO tools when they need user input in a non-CLI context.
+
+    The agent catches this, saves its loop state, and re-raises so the
+    calling UI (e.g. Streamlit) can display the question and later call
+    ``agent.resume_after_user_input(answer)``.
+    """
+
+    def __init__(
+        self,
+        question: str,
+        choices: Optional[List[str]] = None,
+        default: Optional[str] = None,
+    ):
+        self.question = question
+        self.choices = choices
+        self.default = default
+        # Filled in by GeosAgent._run_tool_call when it catches this
+        self.tool_name: str = ""
+        self.tool_call_id: str = ""
+        super().__init__(question)
 
 
 @dataclass
 class AskUser(Tool):
     name: str = "ask_user"
     description: str = "Ask the human a clarifying question and return their response."
+    blocking: bool = True  # False = raise UserInputRequired instead of input()
 
     def get_spec(self) -> Dict[str, Any]:
         return {
@@ -42,6 +66,10 @@ class AskUser(Tool):
         multiline: bool = False,
         end_marker: str = "EOF",
     ) -> Dict[str, Any]:
+        if not self.blocking:
+            raise UserInputRequired(question=question, choices=choices, default=default)
+
+        # --- CLI mode (original behaviour) ---
         prompt = question
         if choices:
             prompt += "\nChoices:\n" + "\n".join(f"- {c}" for c in choices)
@@ -77,6 +105,7 @@ class ConfirmAction(Tool):
     description: str = (
         "Ask the human to approve or deny a potentially destructive action."
     )
+    blocking: bool = True  # False = raise UserInputRequired instead of input()
 
     def get_spec(self) -> Dict[str, Any]:
         return {
@@ -107,6 +136,17 @@ class ConfirmAction(Tool):
     def run(
         self, summary: str, details: str = "", default: str = "deny"
     ) -> Dict[str, Any]:
+        if not self.blocking:
+            question = summary
+            if details:
+                question += f"\n\nDetails:\n{details}"
+            raise UserInputRequired(
+                question=question,
+                choices=["approve", "deny"],
+                default=default,
+            )
+
+        # --- CLI mode (original behaviour) ---
         print("\n=== ACTION CONFIRMATION ===")
         print(summary)
         if details:
