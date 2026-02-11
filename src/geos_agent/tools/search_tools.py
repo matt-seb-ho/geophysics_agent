@@ -75,21 +75,56 @@ class SearchNavigatorTool(Tool):
 
     def run(self, query: str, n_results: int = 5) -> Dict[str, Any]:
         try:
+            # Check for exclusion criteria (RAG contamination prevention)
+            excluded_dir = os.environ.get("EXCLUDED_EXAMPLE_DIR", "").lower().strip()
+
             results = self.collection.query(
                 query_texts=[query],
-                n_results=n_results,
+                n_results=n_results * 2 if excluded_dir else n_results,  # Request more if filtering
             )
 
             formatted = []
-            for i, doc in enumerate(results["documents"][0]):
-                meta = results["metadatas"][0][i]
-                formatted.append({
-                    "title": meta["title"],
-                    "breadcrumbs": meta["breadcrumbs"],
-                    "type": meta["chunk_type"],
-                    "source": meta["source_path"],
-                    "preview": doc[:200] + "..." if len(doc) > 200 else doc,
-                })
+            count = 0
+            
+            # Retrieve documents
+            documents = results.get("documents", [[]])[0]
+            metadatas = results.get("metadatas", [[]])[0]
+
+            if documents and metadatas:
+                for i, doc in enumerate(documents):
+                    if count >= n_results:
+                        break
+                        
+                    meta = metadatas[i]
+                    source_path = meta.get("source_path", "")
+                    is_excluded = False
+                    
+                    # RAG Contamination Filtering
+                    if excluded_dir and source_path:
+                        try:
+                            # e.g., src/docs/sphinx/advancedExamples/validationStudies/carbonStorage/thermalLeakyWell/Example.rst
+                            # Parent dir is 'thermalLeakyWell'
+                            p = Path(source_path)
+                            parent_dir_name = p.parent.name.lower()
+                            
+                            # Check if parent directory name contains the excluded string (substring match)
+                            if excluded_dir in parent_dir_name:
+                                is_excluded = True
+                        except Exception:
+                            pass
+                    
+                    # For excluded items, we include them but hide the xml_reference
+                    # This prevents the agent from easily fetching the full XML source
+                    formatted.append({
+                        "title": meta.get("title", "No Title"),
+                        "breadcrumbs": meta.get("breadcrumbs", ""),
+                        "type": meta.get("chunk_type", "unknown"),
+                        "source": source_path,
+                        "xml_reference": None if is_excluded else meta.get("xml_reference"),
+                        "preview": doc[:200] + "..." if len(doc) > 200 else doc,
+                        "is_excluded": is_excluded
+                    })
+                    count += 1
 
             return {
                 "query": query,

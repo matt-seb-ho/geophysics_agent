@@ -173,6 +173,31 @@ def _extract_all_paths(text: str) -> List[str]:
     return unique
 
 
+def _extract_data_paths(xml_content: str) -> List[str]:
+    """
+    Extract paths relative to GEOSDATA or GEOS directories from XML content.
+    Returns a unique list of relative paths.
+    """
+    if not xml_content:
+        return []
+
+    # Look for paths like .../GEOSDATA/path/to/file or .../GEOS/path/to/file
+    # Capture the "GEOSDATA/..." or "GEOS/..." part (group 2)
+    # The regex matches:
+    # 1. Start quote (['"])
+    # 2. Any chars not the quote
+    # 3. (GEOSDATA|GEOS)/... and captures it
+    # 4. End quote (backreference)
+    pattern = r'([\'"])[^\'"]*((?:GEOSDATA|GEOS)/[^\'"]+)\1'
+    
+    paths = []
+    for match in re.finditer(pattern, xml_content):
+        paths.append(match.group(2))
+    
+    # Deduplicate and sort
+    return sorted(list(set(paths)))
+
+
 def _extract_run_commands(text: str) -> List[str]:
     cmds = []
     for line in text.splitlines():
@@ -188,7 +213,9 @@ def _extract_run_commands(text: str) -> List[str]:
 # ---------- LLM-based spec generation ----------
 
 
-def generate_spec_with_llm(rst_content: str, example_id: str) -> str:
+def generate_spec_with_llm(
+    rst_content: str, example_id: str, data_paths: Optional[List[str]] = None
+) -> str:
     """
     Use Claude opus-4.5 thinking via OpenRouter to generate a comprehensive
     natural language specification from the full RST documentation.
@@ -214,6 +241,7 @@ The specification should:
 5. Describe initial and boundary conditions
 6. Include any numerical method specifications
 7. Note output requirements
+8. Explicitly list any external data files required, using the exact relative paths provided below (if any).
 
 Be specific with numerical values where they appear in the documentation. Write as if you're giving instructions to an AI agent that will generate the XML file.
 
@@ -223,14 +251,23 @@ Example ID: {example_id}
 
 RST Documentation:
 {rst_content}
+"""
 
-Generate the natural language specification:"""
+    if data_paths:
+        prompt += f"""
+
+Relevant Data Files (must be referenced by these exact paths):
+"""
+        for p in data_paths:
+            prompt += f"- {p}\n"
+
+    prompt += "\nGenerate the natural language specification:"
 
     def _make_call():
         response = client.chat.completions.create(
-            model="anthropic/claude-opus-4.5",
+            model="moonshotai/kimi-k2.5",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=8192,
+            max_tokens=100000,
             extra_body={"reasoning": {"enabled": True}},
         )
         return response.choices[0].message.content or ""
@@ -403,8 +440,12 @@ def parse_example_rst(
     
     # Generate natural language spec using LLM
     print(f"  Generating LLM spec for {example_id}...")
+    
+    # Extract data paths from XML content if available
+    data_paths = _extract_data_paths(xml_content)
+    
     try:
-        natural_language_spec = generate_spec_with_llm(full_text, example_id)
+        natural_language_spec = generate_spec_with_llm(full_text, example_id, data_paths)
     except Exception as e:
         print(f"  [warn] LLM call failed: {e}")
         natural_language_spec = ""
@@ -507,7 +548,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--repo-root",
         type=Path,
-        default=PROJECT_ROOT / "data" / "geos_source",
+        default=PROJECT_ROOT / "data" / "GEOS",
         help="Path to the GEOS repo root (containing src/docs/sphinx).",
     )
     parser.add_argument(

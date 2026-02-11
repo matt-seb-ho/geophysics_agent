@@ -35,6 +35,12 @@ for experiment_dir in "$EXPERIMENTS_DIR"/*; do
         echo "Running: uv run geos-agent with instructions from instructions.txt"
         echo "Workspace: $experiment_dir"
         
+        # Extract experiment name (e.g. thermalLeakyWell) from the full path or use parent dirname
+        # The user requested filtering based on substring match of the experiment folder name
+        # against the parent directory of the source file.
+        # We export the experiment directory name as the exclusion term.
+        export EXCLUDED_EXAMPLE_DIR="$experiment_name"
+        
         # Use command substitution with proper quoting
         uv run geos-agent --instruction "$(cat "$instructions_file")" --workspace "$experiment_dir" --log "$experiment_dir/log.json"
         

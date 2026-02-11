@@ -77,6 +77,12 @@ CRITICAL FILE LOCATION RULES:
     'inputs/scripts/plot_fracture.py' ✓  'outputs/results.txt' ✓  'simulation.xml' ✗
 
 
+GEOSDATA PATH RESOLUTION:
+  • Any reference to `GEOSDATA` in instructions corresponds to the local path:
+    /data/shared/geophysics_agent_data/data/GEOSDATA
+  • Use this absolute path when referencing shared data files in XML or scripts.
+
+
 EXECUTION REQUIREMENTS:
   • After creating XML in inputs/, ALWAYS run the simulation using run_geos tool
   • If simulation fails, analyze errors and fix XML

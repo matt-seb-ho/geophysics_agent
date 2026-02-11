@@ -42,6 +42,25 @@ class ReadFileTool(Tool):
         return f"reading '{path}'"
 
     def run(self, path: str, max_chars: int = 4000) -> Dict[str, Any]:
+        # RAG Contamination Prevention: Block retrieval of XML files from excluded directories
+        import os
+        excluded_dir = os.environ.get("EXCLUDED_EXAMPLE_DIR", "").lower().strip()
+        if excluded_dir:
+            try:
+                # Check extension
+                if str(path).lower().endswith(".xml"):
+                    # Check if file path contains the excluded directory string in its parent path
+                    # We use a broad check to catch various path formats (absolute/relative)
+                    p = Path(path)
+                    # Use string representation to catch directory names in path
+                    if excluded_dir in str(p.parent).lower():
+                        return {
+                            "error": f"Access denied: XML files from '{excluded_dir}' are restricted during this experiment.",
+                            "path": str(path)
+                        }
+            except Exception:
+                pass
+                
         abs_path = (self.workspace_root / path).resolve()
         if not str(abs_path).startswith(str(self.workspace_root)):
             return {"error": "Attempted to read outside of workspace."}

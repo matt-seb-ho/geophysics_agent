@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 from .base import Tool
 
 
-from ..constants import GEOS_SOURCE_DIR
+from ..constants import GEOS_SOURCE_DIR, GEOSDATA_SOURCE_DIR
 
 
 class FetchCodeTool(Tool):
@@ -65,12 +65,52 @@ class FetchCodeTool(Tool):
     ) -> Dict[str, Any]:
         """Fetch code from file with optional line/marker filtering."""
         
+        # RAG Contamination Prevention: Block retrieval of XML files from excluded directories
+        import os
+        excluded_dir = os.environ.get("EXCLUDED_EXAMPLE_DIR", "").lower().strip()
+        if excluded_dir:
+            try:
+                # Check extension
+                if str(file_path).lower().endswith(".xml"):
+                    # Check if file path contains the excluded directory string in its parent path
+                    # We use a broad check to catch various path formats (absolute/relative)
+                    p = Path(file_path)
+                    # Use string representation to catch directory names in path
+                    if excluded_dir in str(p.parent).lower():
+                        return {
+                            "error": f"Access denied: XML files from '{excluded_dir}' are restricted during this experiment.",
+                            "file": str(file_path)
+                        }
+            except Exception:
+                pass
+
         path = Path(file_path)
-        if not path.is_absolute():
-            path = GEOS_SOURCE_DIR / path
+        resolved_path = None
+
+        if path.is_absolute():
+            if path.exists():
+                resolved_path = path
+        else:
+            # Try GEOS_SOURCE_DIR
+            p1 = GEOS_SOURCE_DIR / path
+            if p1.exists():
+                resolved_path = p1
+            else:
+                # Fallback: Try GEOSDATA_SOURCE_DIR
+                p2 = GEOSDATA_SOURCE_DIR / path
+                if p2.exists():
+                    resolved_path = p2
         
-        if not path.exists():
-            return {"error": f"File not found: {file_path}"}
+        if not resolved_path:
+            return {
+                "error": f"File not found: {file_path}",
+                "checked_locations": [
+                    str(GEOS_SOURCE_DIR / path) if not path.is_absolute() else str(path),
+                    str(GEOSDATA_SOURCE_DIR / path) if not path.is_absolute() else None
+                ]
+            }
+        
+        path = resolved_path
         
         try:
             content = path.read_text(encoding="utf-8")
