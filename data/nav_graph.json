@@ -33,36 +33,6 @@
         "src/docs/sphinx/advancedExamples/pygeosxExamples/Index.rst"
       ]
     },
-    "src/docs/sphinx/userGuide/Index.rst": {
-      "node_id": "src/docs/sphinx/userGuide/Index.rst",
-      "title": "userGuide",
-      "path": "/data/brianliu/GEOS/src/docs/sphinx/userGuide/Index.rst",
-      "children": []
-    },
-    "src/docs/sphinx/basicExamples/Index.rst": {
-      "node_id": "src/docs/sphinx/basicExamples/Index.rst",
-      "title": "Basic Examples",
-      "path": "/data/brianliu/GEOS/src/docs/sphinx/basicExamples/Index.rst",
-      "children": [
-        "src/docs/sphinx/basicExamples/multiphaseFlow/Example.rst",
-        "src/docs/sphinx/basicExamples/multiphaseFlowWithWells/Example.rst",
-        "src/docs/sphinx/basicExamples/co2Injection/Example.rst",
-        "src/docs/sphinx/basicExamples/poromechanics/Example.rst",
-        "src/docs/sphinx/basicExamples/hydraulicFracturing/Example.rst",
-        "src/docs/sphinx/basicExamples/triaxialDriver/Example.rst"
-      ]
-    },
-    "src/docs/sphinx/tutorials/Index.rst": {
-      "node_id": "src/docs/sphinx/tutorials/Index.rst",
-      "title": "Tutorials",
-      "path": "/data/brianliu/GEOS/src/docs/sphinx/tutorials/Index.rst",
-      "children": [
-        "src/docs/sphinx/tutorials/step01/Tutorial.rst",
-        "src/docs/sphinx/tutorials/step02/Tutorial.rst",
-        "src/docs/sphinx/tutorials/step03/Tutorial.rst",
-        "src/docs/sphinx/tutorials/step04/Tutorial.rst"
-      ]
-    },
     "src/docs/sphinx/advancedExamples/pygeosxExamples/Index.rst": {
       "node_id": "src/docs/sphinx/advancedExamples/pygeosxExamples/Index.rst",
       "title": "pygeosx Examples",
@@ -85,18 +55,6 @@
         "src/docs/sphinx/advancedExamples/validationStudies/poromechanics/Index.rst",
         "src/docs/sphinx/advancedExamples/validationStudies/thermoPoromechanics/Index.rst"
       ]
-    },
-    "src/docs/sphinx/advancedExamples/applicationStudies/Index.rst": {
-      "node_id": "src/docs/sphinx/advancedExamples/applicationStudies/Index.rst",
-      "title": "Application Studies",
-      "path": "/data/brianliu/GEOS/src/docs/sphinx/advancedExamples/applicationStudies/Index.rst",
-      "children": []
-    },
-    "src/docs/sphinx/advancedExamples/performanceBenchmarks/Index.rst": {
-      "node_id": "src/docs/sphinx/advancedExamples/performanceBenchmarks/Index.rst",
-      "title": "Wellbore problem scaling on Frontier",
-      "path": "/data/brianliu/GEOS/src/docs/sphinx/advancedExamples/performanceBenchmarks/Index.rst",
-      "children": []
     },
     "src/docs/sphinx/advancedExamples/validationStudies/thermoPoromechanics/Index.rst": {
       "node_id": "src/docs/sphinx/advancedExamples/validationStudies/thermoPoromechanics/Index.rst",
@@ -186,6 +144,48 @@
         "src/docs/sphinx/advancedExamples/validationStudies/carbonStorage/thermalLeakyWell/Example.rst",
         "src/docs/sphinx/advancedExamples/validationStudies/carbonStorage/isothermalHystInjection/Example.rst",
         "src/docs/sphinx/advancedExamples/validationStudies/carbonStorage/spe11b/Example.rst"
+      ]
+    },
+    "src/docs/sphinx/advancedExamples/applicationStudies/Index.rst": {
+      "node_id": "src/docs/sphinx/advancedExamples/applicationStudies/Index.rst",
+      "title": "Application Studies",
+      "path": "/data/brianliu/GEOS/src/docs/sphinx/advancedExamples/applicationStudies/Index.rst",
+      "children": []
+    },
+    "src/docs/sphinx/advancedExamples/performanceBenchmarks/Index.rst": {
+      "node_id": "src/docs/sphinx/advancedExamples/performanceBenchmarks/Index.rst",
+      "title": "Wellbore problem scaling on Frontier",
+      "path": "/data/brianliu/GEOS/src/docs/sphinx/advancedExamples/performanceBenchmarks/Index.rst",
+      "children": []
+    },
+    "src/docs/sphinx/userGuide/Index.rst": {
+      "node_id": "src/docs/sphinx/userGuide/Index.rst",
+      "title": "userGuide",
+      "path": "/data/brianliu/GEOS/src/docs/sphinx/userGuide/Index.rst",
+      "children": []
+    },
+    "src/docs/sphinx/basicExamples/Index.rst": {
+      "node_id": "src/docs/sphinx/basicExamples/Index.rst",
+      "title": "Basic Examples",
+      "path": "/data/brianliu/GEOS/src/docs/sphinx/basicExamples/Index.rst",
+      "children": [
+        "src/docs/sphinx/basicExamples/multiphaseFlow/Example.rst",
+        "src/docs/sphinx/basicExamples/multiphaseFlowWithWells/Example.rst",
+        "src/docs/sphinx/basicExamples/co2Injection/Example.rst",
+        "src/docs/sphinx/basicExamples/poromechanics/Example.rst",
+        "src/docs/sphinx/basicExamples/hydraulicFracturing/Example.rst",
+        "src/docs/sphinx/basicExamples/triaxialDriver/Example.rst"
+      ]
+    },
+    "src/docs/sphinx/tutorials/Index.rst": {
+      "node_id": "src/docs/sphinx/tutorials/Index.rst",
+      "title": "Tutorials",
+      "path": "/data/brianliu/GEOS/src/docs/sphinx/tutorials/Index.rst",
+      "children": [
+        "src/docs/sphinx/tutorials/step01/Tutorial.rst",
+        "src/docs/sphinx/tutorials/step02/Tutorial.rst",
+        "src/docs/sphinx/tutorials/step03/Tutorial.rst",
+        "src/docs/sphinx/tutorials/step04/Tutorial.rst"
       ]
     }
   },

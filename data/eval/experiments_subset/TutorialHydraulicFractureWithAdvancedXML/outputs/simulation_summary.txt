@@ -1,0 +1,51 @@
+======================================================================
+GEOS HYDRAULIC FRACTURING SIMULATION - SETUP SUMMARY
+======================================================================
+
+SIMULATION PARAMETERS:
+----------------------------------------
+Maximum simulation time: 20 minutes
+Fluid viscosity (default): 1 cP (0.001 Pa.s)
+Pump start delay: 1 minute
+Pump ramp duration: 5 seconds
+Maximum timestep: 30 seconds
+Pump ramp timestep limit: 0.2 seconds
+HPC allocation: 28 minutes
+
+MESH CONFIGURATION:
+----------------------------------------
+Type: Internal mesh with biased boundaries
+Element type: C3D8 (hexahedral)
+X extent: 0 to 250 m (50 + 5 elements)
+Y extent: -100 to 100 m (10 + 10 elements)
+Z extent: -150 to 150 m (5 + 25 + 25 + 5 elements)
+Total elements: ~41,250
+
+FRACTURE GEOMETRY:
+----------------------------------------
+Fracture plane: y = 0
+Injection location: (0, 0, 0)
+Initial perforation: 8m x 8m around origin
+Fracturable surface: Thick plane at y=0
+
+BOUNDARY CONDITIONS:
+----------------------------------------
+Mechanical: Roller (zero displacement normal) on all boundaries
+In-situ stress: Table-based heterogeneous from geologic model
+Initial pore pressure: Table-based from geologic model
+Injection: Source flux with trapezoidal pumping schedule
+
+PHYSICS COUPLING:
+----------------------------------------
+Solver: Hydrofracture (fully coupled)
+  - SolidMechanicsLagrangianFEM for rock deformation
+  - SinglePhaseFVM for fracture flow
+  - SurfaceGenerator for fracture propagation
+
+OUTPUTS:
+----------------------------------------
+VTK: Every 1 minute (for Paraview)
+Silo: Every 1 minute (for VisIt)
+Restart: On HaltEvent (28 min allocation)
+
+======================================================================

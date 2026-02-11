@@ -1,0 +1,52 @@
+======================================================================
+Extended Drucker-Prager Wellbore Simulation Summary
+======================================================================
+
+Simulation Parameters:
+----------------------------------------
+Model: Extended Drucker-Prager with strain hardening
+Bulk modulus K: 500 MPa
+Shear modulus G: 300 MPa
+Initial friction angle: 15.27 degrees
+Residual friction angle: 23.05 degrees
+Hardening rate: 0.01
+Dilation ratio: 1.0 (associated flow)
+Cohesion: 0.0 MPa
+
+In-situ Stress Conditions:
+----------------------------------------
+Horizontal stress: -11.25 MPa (isotropic)
+Vertical stress: -15.0 MPa
+
+Loading History:
+----------------------------------------
+Initial wellbore pressure: 11.25 MPa
+Final wellbore pressure: 2.0 MPa
+Total simulation time: 1.02 s
+
+Expected Results:
+----------------------------------------
+- Wellbore contraction due to pressure reduction
+- Plastic zone development around wellbore
+- Stress redistribution from elastic to plastic solution
+- Strain hardening behavior after yield initiation
+
+Reference:
+----------------------------------------
+Chen and Abousleiman (2017)
+"Exact drained solution for wellbore problems
+ with the Extended Drucker-Prager model"
+
+Output Files:
+----------------------------------------
+  - displacementHistory.hdf5
+  - radial_stress_distribution.png
+  - simulation_summary.txt
+  - stressHistory_rock.hdf5
+  - stress_path_wellbore.png
+  - vtkOutput
+  - vtkOutput.pvd
+  - wellbore_contraction.png
+  - wellbore_pressure_evolution.png
+
+======================================================================
