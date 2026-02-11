@@ -2,11 +2,12 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from geos_agent.agent_config import AgentConfig
 from geos_agent.api_client import OpenRouterClient, RetryConfig
 from geos_agent.tools.base import Tool
+from geos_agent.tools.user_io import UserInputRequired
 
 # ==============================
 # System Prompt Template
@@ -43,6 +44,9 @@ This pattern promotes reusability and parameter sweeps. If the scenario is simpl
 with no anticipated variants, a single file is acceptable. Use suffixes that match \
 the context (e.g., `_base` and `_run` for execution variants, `_base` and `_benchmark` \
 for validation, `_base` and `_case1` for multiple scenarios).
+
+OUTPUT FILE ORGANIZATION:
+- A common pattern with GEOS is to define certain "classes" in auxiliary XML files that
 
 
 VISUALIZATION SCRIPT GENERATION:
@@ -208,8 +212,10 @@ class GeosAgent:
         workspace_root: Path,
         tools: List[Tool],
         config: Optional[AgentConfig] = None,
+        stream_callback: Optional[Callable] = None,
     ):
         self.workspace_root = Path(workspace_root).resolve()
+        self.stream_callback = stream_callback
 
         # Initialize OpenRouter client with retry configuration
         retry_config = RetryConfig(
@@ -224,6 +230,7 @@ class GeosAgent:
             api_key=os.environ.get("OPENROUTER_API_KEY"),
             retry_config=retry_config,
             log_callback=self._log,
+            stream_callback=stream_callback,
         )
         self.config = config or AgentConfig()
         self.config.mode = (self.config.mode or "auto").lower()
@@ -265,6 +272,15 @@ class GeosAgent:
             ]
 
         self.tool_map = {t.name: t for t in self.tools}
+
+        # When driven by a GUI (stream_callback set), make IO tools
+        # non-blocking so they raise UserInputRequired instead of input().
+        if stream_callback:
+            for t in self.tools:
+                if hasattr(t, "blocking"):
+                    t.blocking = False
+
+        self._pending_user_input: Optional[dict] = None
 
     # ------------- logging -------------
 
@@ -394,7 +410,10 @@ class GeosAgent:
 
         # Get descriptive summary from the tool itself
         args_summary = tool.format_execution_summary(**args)
-        print(f"\n🔧 {name}: {args_summary}", file=sys.stderr, flush=True)
+        if self.stream_callback:
+            self.stream_callback("tool_start", {"name": name, "summary": args_summary})
+        else:
+            print(f"\n🔧 {name}: {args_summary}", file=sys.stderr, flush=True)
 
         try:
             output_obj = tool.run(**args)
@@ -408,17 +427,26 @@ class GeosAgent:
                 args=args,
                 result_preview=result_str[:500],
             )
+            if self.stream_callback:
+                self.stream_callback("tool_result", {"name": name, "result": result_str[:2000]})
             return {
                 "role": "tool",
                 "tool_call_id": tool_call.id,
                 "content": result_str,
             }
+        except UserInputRequired as e:
+            # Annotate with tool call metadata so the caller can resume later
+            e.tool_name = name
+            e.tool_call_id = tool_call.id
+            raise
         except Exception as e:
             result_str = json.dumps(
                 {"error": f"Tool {name} raised an exception: {e!r}", "args": args},
                 ensure_ascii=False,
             )
             self._log("tool_run_exception", tool=name, args=args, error=str(e))
+            if self.stream_callback:
+                self.stream_callback("tool_error", {"name": name, "error": str(e)})
             return {
                 "role": "tool",
                 "tool_call_id": tool_call.id,
@@ -437,6 +465,8 @@ class GeosAgent:
         Raises:
             AgentTerminationException: If the agent terminates prematurely or
                 reaches max_steps without completing the task.
+            UserInputRequired: If ask_user / confirm_action needs input from
+                the user.  Call ``resume_after_user_input(answer)`` to continue.
         """
         if not self.messages:
             self.start_session()
@@ -444,12 +474,76 @@ class GeosAgent:
         self._log("user_input", content=user_input)
         self.messages.append({"role": "user", "content": user_input})
 
-        total_tool_calls = 0
-        last_assistant_text = ""
-        termination_reason = None
-        diagnostic_info = {}
+        return self._continue_step_loop(start_step=1, total_tool_calls=0)
 
-        for step_idx in range(1, self.config.max_steps + 1):
+    # ------------------------------------------------------------------
+    # Human-in-the-loop resume
+    # ------------------------------------------------------------------
+
+    def resume_after_user_input(self, answer: str) -> str:
+        """Continue the agent loop after the UI collected a user answer.
+
+        This is called when a previous ``step()`` or
+        ``resume_after_user_input()`` raised ``UserInputRequired``.
+        The caller should pass the user's textual answer.
+
+        Raises:
+            UserInputRequired: If the agent asks *another* question.
+            AgentTerminationException: On premature termination / max steps.
+        """
+        pending = getattr(self, "_pending_user_input", None)
+        if pending is None:
+            raise RuntimeError("No pending user-input request to resume from")
+
+        exc: UserInputRequired = pending["exception"]
+        tool_call = pending["tool_call"]
+        remaining_tcs = pending["remaining_tool_calls"]
+        state = pending["step_state"]
+
+        self._pending_user_input = None
+
+        # Build the tool result the model expects
+        if exc.tool_name == "confirm_action":
+            approved = answer.lower() in ("y", "yes", "approve")
+            result = json.dumps({"approved": approved, "answer": answer})
+        else:
+            # ask_user
+            result = json.dumps({"text": answer})
+
+        if self.stream_callback:
+            self.stream_callback(
+                "tool_result", {"name": exc.tool_name, "result": result}
+            )
+
+        self.messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": result,
+        })
+
+        total_tool_calls = state["total_tool_calls"] + 1
+
+        # Execute any remaining tool calls from the interrupted batch
+        for tc in remaining_tcs:
+            tool_message = self._run_tool_call(tc)
+            self.messages.append(tool_message)
+            total_tool_calls += 1
+
+        return self._continue_step_loop(
+            start_step=state["step_idx"] + 1,
+            total_tool_calls=total_tool_calls,
+        )
+
+    # ------------------------------------------------------------------
+    # Core step loop (shared by step / resume_after_user_input)
+    # ------------------------------------------------------------------
+
+    def _continue_step_loop(
+        self, start_step: int, total_tool_calls: int
+    ) -> str:
+        last_assistant_text = ""
+
+        for step_idx in range(start_step, self.config.max_steps + 1):
             self._log("step_start", step=step_idx)
 
             assistant_text, tool_calls, _ = self._call_model_streaming()
@@ -483,14 +577,10 @@ class GeosAgent:
 
             if not tool_calls:
                 # Agent stopped requesting tools - check if this is premature
-                termination_reason = "no_tool_calls"
-                self._log("turn_complete", step=step_idx, outcome=termination_reason)
+                self._log("turn_complete", step=step_idx, outcome="no_tool_calls")
 
-                # Check for indicators of incomplete task
                 indicators = self._check_completion_indicators(assistant_text)
-                diagnostic_info.update(indicators)
 
-                # Raise exception if task appears incomplete
                 if not indicators.get("task_complete", False):
                     raise AgentTerminationException(
                         message="Agent terminated without completing the task",
@@ -499,19 +589,31 @@ class GeosAgent:
                         max_steps=self.config.max_steps,
                         last_assistant_message=assistant_text,
                         tool_calls_made=total_tool_calls,
-                        diagnostic_info=diagnostic_info,
+                        diagnostic_info=indicators,
                     )
 
                 return assistant_text
 
-            # Execute tool calls
-            for tc in tool_calls:
-                tool_message = self._run_tool_call(tc)
+            # Execute tool calls — may raise UserInputRequired
+            for i, tc in enumerate(tool_calls):
+                try:
+                    tool_message = self._run_tool_call(tc)
+                except UserInputRequired as e:
+                    # Save loop state so we can resume later
+                    self._pending_user_input = {
+                        "exception": e,
+                        "tool_call": tc,
+                        "remaining_tool_calls": list(tool_calls[i + 1:]),
+                        "step_state": {
+                            "step_idx": step_idx,
+                            "total_tool_calls": total_tool_calls,
+                        },
+                    }
+                    raise
                 self.messages.append(tool_message)
                 total_tool_calls += 1
 
         # Max steps reached
-        termination_reason = "max_steps_reached"
         self._log("max_steps_reached", max_steps=self.config.max_steps)
 
         raise AgentTerminationException(

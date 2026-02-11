@@ -226,3 +226,6 @@ data/outputs/*
 # GEOS file types
 *.xml
 *.vtk
+
+# data folder
+/data/

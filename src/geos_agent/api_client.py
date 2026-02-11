@@ -55,6 +55,7 @@ class OpenRouterClient:
         api_key: str,
         retry_config: Optional[RetryConfig] = None,
         log_callback: Optional[Callable[[str, Any], None]] = None,
+        stream_callback: Optional[Callable] = None,
     ):
         """
         Initialize OpenRouter client.
@@ -64,6 +65,10 @@ class OpenRouterClient:
             retry_config: Retry configuration (uses defaults if None)
             log_callback: Optional callback for logging events.
                          Should accept (event_name: str, **kwargs)
+            stream_callback: Optional callback for streaming events.
+                         Called with (event_type: str, data: Any) where event_type
+                         is one of: "text", "thinking_start", "thinking",
+                         "thinking_end", "tool_start", "tool_result", "tool_error".
         """
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
@@ -71,6 +76,7 @@ class OpenRouterClient:
         )
         self.retry_config = retry_config or RetryConfig()
         self.log_callback = log_callback
+        self.stream_callback = stream_callback
         # Track cumulative token usage
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
@@ -332,23 +338,38 @@ class OpenRouterClient:
                     r_content = getattr(delta, "reasoning", None)
                     if r_content:
                         if not reasoning_active:
-                            print("<Thinking>", end="", flush=True)
+                            if self.stream_callback:
+                                self.stream_callback("thinking_start", "")
+                            else:
+                                print("<Thinking>", end="", flush=True)
                             reasoning_active = True
-                        print(r_content, end="", flush=True)
+                        if self.stream_callback:
+                            self.stream_callback("thinking", r_content)
+                        else:
+                            print(r_content, end="", flush=True)
 
                     # Handle text content
                     if delta.content:
                         if reasoning_active:
-                            print("</Thinking>\n", end="", flush=True)
+                            if self.stream_callback:
+                                self.stream_callback("thinking_end", "")
+                            else:
+                                print("</Thinking>\n", end="", flush=True)
                             reasoning_active = False
-                        
-                        print(delta.content, end="", flush=True)
+
+                        if self.stream_callback:
+                            self.stream_callback("text", delta.content)
+                        else:
+                            print(delta.content, end="", flush=True)
                         full_content += delta.content
 
                     # Handle tool calls (they come in chunks)
                     if delta.tool_calls:
                         if reasoning_active:
-                            print("</Thinking>\n", end="", flush=True)
+                            if self.stream_callback:
+                                self.stream_callback("thinking_end", "")
+                            else:
+                                print("</Thinking>\n", end="", flush=True)
                             reasoning_active = False
 
                         for tc in delta.tool_calls:
@@ -374,7 +395,10 @@ class OpenRouterClient:
                 raise
 
             if reasoning_active:
-                print("</Thinking>\n", end="", flush=True)
+                if self.stream_callback:
+                    self.stream_callback("thinking_end", "")
+                else:
+                    print("</Thinking>\n", end="", flush=True)
 
             # Convert accumulated tool calls to a list of simple objects
             tool_calls = []
@@ -398,7 +422,7 @@ class OpenRouterClient:
                 )()
                 tool_calls.append(tool_call)
 
-            if full_content:
+            if full_content and not self.stream_callback:
                 print()  # Newline after streaming
 
             return full_content, tool_calls, usage_data
