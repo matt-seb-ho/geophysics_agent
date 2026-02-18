@@ -171,6 +171,13 @@ def _create_agent() -> GeosAgent:
         tools=tools,
         config=config,
     )
+    # Mark IO tools as non-blocking so they raise UserInputRequired
+    # instead of calling input() on stdin.  The stream_callback is
+    # wired up per-turn (after agent creation), so __init__'s
+    # "if stream_callback" guard doesn't flip this for us.
+    for t in agent.tools:
+        if hasattr(t, "blocking"):
+            t.blocking = False
     agent.start_session()
     return agent
 

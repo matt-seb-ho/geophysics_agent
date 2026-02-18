@@ -94,8 +94,29 @@ CRITICAL FILE LOCATION RULES:
 
 GEOSDATA PATH RESOLUTION:
   • Any reference to `GEOSDATA` in instructions corresponds to the local path:
-    /data/shared/geophysics_agent_data/data/GEOSDATA
+    {geosdata_source_dir}
   • Use this absolute path when referencing shared data files in XML or scripts.
+
+
+DOCUMENTATION PATH RESOLUTION:
+  File paths that appear in GEOS documentation and search results (e.g. in
+  `xml_reference`, `source_path`, or inline references) are relative to the
+  GEOS source tree located at: {geos_source_dir}
+
+  Common patterns you will encounter and how to interpret them:
+    • `inputFiles/…`            → {geos_source_dir}/inputFiles/…
+    • `src/docs/sphinx/…`       → {geos_source_dir}/src/docs/sphinx/…
+    • Relative paths such as `../../../inputFiles/…` → strip the leading `../`
+      segments and resolve from {geos_source_dir} (i.e. → `inputFiles/…`)
+
+  How to use these paths:
+    • To retrieve the actual file content, call the `fetch_code` tool with the
+      path as-is (e.g. `inputFiles/singlePhaseFlow/example.xml`). The tool
+      automatically resolves it against GEOS_SOURCE_DIR and GEOSDATA_SOURCE_DIR.
+    • Do NOT attempt to read these files with `read_file`—they live outside the
+      workspace. Use `fetch_code` instead.
+    • When search results include an `xml_reference` field, that value is ready
+      to pass directly to `fetch_code`.
 
 
 EXECUTION REQUIREMENTS:
@@ -275,6 +296,9 @@ class GeosAgent:
         # Build mode-specific instructions
         mode_specific = MODE_INTERACTIVE if self.config.mode == "interactive" else MODE_AUTO
 
+        # Import source directory constants for path resolution guidance
+        from geos_agent.constants import GEOS_SOURCE_DIR, GEOSDATA_SOURCE_DIR
+
         # Build primer section if configured
         primer = ""
         if self.config.include_primer:
@@ -295,7 +319,9 @@ class GeosAgent:
         self.system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
             workspace_root=self.workspace_root,
             mode_specific=mode_specific,
-            primer=primer
+            primer=primer,
+            geos_source_dir=GEOS_SOURCE_DIR,
+            geosdata_source_dir=GEOSDATA_SOURCE_DIR,
         )
 
         self.messages: List[Dict[str, Any]] = []

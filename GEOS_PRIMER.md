@@ -444,6 +444,11 @@ For code contributors:
 
 ## Common Workflows
 
+> **Note on file paths below:** Paths like `inputFiles/…` and `tutorials/…`
+> are relative to the GEOS source tree (`GEOS_SOURCE_DIR`). Use the
+> `fetch_code` tool to retrieve their contents — it resolves the path
+> automatically.
+
 ### 1. Single-Phase Flow Problem
 
 **Steps**:
