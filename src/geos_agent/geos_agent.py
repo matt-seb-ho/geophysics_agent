@@ -152,7 +152,8 @@ TOOLS AVAILABLE:
   • Code retrieval: fetch actual XML examples from docs
   • GEOS execution: run simulations with run_geos tool
 {mode_specific}
-{primer}"""
+{primer}
+{cheatsheet}"""
 
 
 
@@ -315,11 +316,25 @@ class GeosAgent:
                     # If primer can't be loaded, log but don't fail
                     print(f"Warning: Could not load GEOS primer: {e}", file=sys.stderr)
 
+        # Build cheatsheet section if configured
+        cheatsheet_section = ""
+        if self.config.include_cheatsheet:
+            from geos_agent.cheatsheet import CHEATSHEET_TEMPLATE, load_cheatsheet
+            from geos_agent.constants import CHEATSHEET_PATH
+
+            cheatsheet_content = load_cheatsheet(CHEATSHEET_PATH)
+            if cheatsheet_content:
+                cheatsheet_section = CHEATSHEET_TEMPLATE.format(
+                    separator="=" * 80,
+                    content=cheatsheet_content,
+                )
+
         # Format the final system prompt
         self.system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
             workspace_root=self.workspace_root,
             mode_specific=mode_specific,
             primer=primer,
+            cheatsheet=cheatsheet_section,
             geos_source_dir=GEOS_SOURCE_DIR,
             geosdata_source_dir=GEOSDATA_SOURCE_DIR,
         )

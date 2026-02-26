@@ -27,6 +27,9 @@ OUTPUT_DIR = DATA_DIR / "outputs"
 # GEOS Primer (high-level documentation summary for agent context)
 PRIMER_PATH = PROJECT_ROOT / "GEOS_PRIMER.md"
 
+# Dynamic cheatsheet (cross-session memory curated from past trajectories)
+CHEATSHEET_PATH = DATA_DIR / "cheatsheet.md"
+
 # Knowledge Base Paths
 # GEOS_SOURCE_DIR = DATA_DIR / "geos_source"  # Raw GEOS docs (RST/XML)
 GEOS_SOURCE_DIR = Path("/data/shared/geophysics_agent_data/data/GEOS")

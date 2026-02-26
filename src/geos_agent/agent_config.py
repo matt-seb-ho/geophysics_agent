@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -12,6 +13,11 @@ class AgentConfig:
 
     # Context configuration
     include_primer: bool = True  # Include GEOS_PRIMER.md in agent context at startup
+
+    # Dynamic cheatsheet (cross-session memory)
+    include_cheatsheet: bool = True   # Load cheatsheet into system prompt
+    curate_cheatsheet: bool = True    # Update cheatsheet after each run
+    curator_model: Optional[str] = None  # Model for curation (defaults to agent model)
 
     # API retry configuration
     max_retries: int = 3  # Maximum number of retry attempts for API calls

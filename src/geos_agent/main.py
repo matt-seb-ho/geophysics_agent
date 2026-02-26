@@ -10,6 +10,37 @@ from geos_agent.tools.utils import build_default_tools
 # ==============================
 
 
+def _save_log(agent: GeosAgent, log_path: str) -> None:
+    """Save the conversation log to a JSON file."""
+    import json
+
+    log_data = agent._get_conversation_log()
+    log_file = Path(log_path).resolve()
+    with log_file.open("w", encoding="utf-8") as f:
+        json.dump(log_data, f, indent=2, ensure_ascii=False)
+    print(f"\nConversation log saved to: {log_file}")
+
+
+def _curate_cheatsheet(agent: GeosAgent, config: AgentConfig) -> None:
+    """Run post-run cheatsheet curation if enabled."""
+    if not config.curate_cheatsheet:
+        return
+
+    from geos_agent.cheatsheet import curate_and_save
+    from geos_agent.constants import CHEATSHEET_PATH
+
+    try:
+        log_data = agent._get_conversation_log()
+        curate_and_save(
+            conversation_log=log_data,
+            cheatsheet_path=CHEATSHEET_PATH,
+            client=agent.client,
+            model=config.curator_model or config.model,
+        )
+    except Exception as e:
+        print(f"Warning: Cheatsheet curation failed: {e}", file=sys.stderr)
+
+
 def main():
     import argparse
 
@@ -67,10 +98,25 @@ def main():
         default=2.0,
         help="Exponential backoff multiplier for retry delays (default: 2.0).",
     )
+    parser.add_argument(
+        "--no-cheatsheet",
+        action="store_true",
+        help="Disable dynamic cheatsheet loading and post-run curation.",
+    )
+    parser.add_argument(
+        "--no-curate",
+        action="store_true",
+        help="Disable post-run cheatsheet curation (still loads existing cheatsheet).",
+    )
+    parser.add_argument(
+        "--curator-model",
+        type=str,
+        default=None,
+        help="Model to use for cheatsheet curation (default: same as --model).",
+    )
 
     args = parser.parse_args()
     workspace_root = Path(args.workspace).resolve()
-    # log_path = Path(args.log) if args.log else None  # Handled at end of run
 
     tools = build_default_tools(workspace_root)
     config = AgentConfig(
@@ -79,12 +125,14 @@ def main():
         max_retries=args.max_retries,
         retry_delay=args.retry_delay,
         retry_backoff=args.retry_backoff,
+        include_cheatsheet=not args.no_cheatsheet,
+        curate_cheatsheet=not args.no_cheatsheet and not args.no_curate,
+        curator_model=args.curator_model,
     )
     agent = GeosAgent(
         workspace_root=workspace_root,
         tools=tools,
         config=config,
-        # log_path=log_path,  # Deprecated
     )
 
     if args.instruction is not None:
@@ -95,36 +143,28 @@ def main():
 
         try:
             agent.run(instruction)
-            
-            # Save conversation log to file ONLY if --log is provided
+
             if args.log:
-                import json
-                log_data = agent._get_conversation_log()
-                log_file = Path(args.log).resolve()
-                
-                with log_file.open("w", encoding="utf-8") as f:
-                    json.dump(log_data, f, indent=2, ensure_ascii=False)
-                print(f"\nConversation log saved to: {log_file}")
-            
+                _save_log(agent, args.log)
+
+            _curate_cheatsheet(agent, config)
+
         except AgentTerminationException as e:
             print("\n" + "=" * 60, file=sys.stderr)
             print("AGENT TERMINATION ERROR", file=sys.stderr)
             print("=" * 60, file=sys.stderr)
             print(str(e), file=sys.stderr)
             print("=" * 60, file=sys.stderr)
-            
-            if args.log:
-                import json
-                try:
-                    log_data = agent._get_conversation_log()
-                    log_file = Path(args.log).resolve()
 
-                    with log_file.open("w", encoding="utf-8") as f:
-                        json.dump(log_data, f, indent=2, ensure_ascii=False)
-                    print(f"\nConversation log saved to: {log_file}", file=sys.stderr)
+            if args.log:
+                try:
+                    _save_log(agent, args.log)
                 except Exception as log_error:
                     print(f"Failed to save conversation log: {log_error}", file=sys.stderr)
-            
+
+            # Still curate on failure — errors are valuable learning
+            _curate_cheatsheet(agent, config)
+
             sys.exit(1)
     else:
         print("GEOS-Agent interactive mode. Type 'exit' or 'quit' to exit.")
