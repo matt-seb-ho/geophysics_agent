@@ -16,6 +16,7 @@ This document provides a high-level overview of GEOS (Geomechanics and EOS Simul
 6. [Important Concepts](#important-concepts)
 7. [Documentation Map](#documentation-map)
 8. [Common Workflows](#common-workflows)
+9. [RAG Tools Reference](#rag-tools-reference)
 
 ---
 
@@ -537,19 +538,34 @@ geosx -i input.xml -v
 
 ### Finding Information in RAG
 
-When searching the GEOS knowledge base:
+When searching the GEOS knowledge base, three collections are available — use the right one for the right question:
 
-1. **Conceptual questions** (Navigator collection):
+1. **Conceptual questions** → `search_navigator` (Navigator collection):
    - "What is poromechanics?"
    - "How does GEOS handle multiphase flow?"
-   - "What constitutive models are available?"
+   - "Which tutorial covers hydraulic fracturing?"
+   - Returns: document/section titles, breadcrumbs, source `.rst` path
+   - Follow-up: optionally call `fetch_code` on the returned `source` path to read the raw RST
 
-2. **Implementation questions** (Technical collection):
-   - "How do I define a SinglePhaseFVM solver?"
-   - "XML syntax for InternalMesh"
-   - "How to set boundary conditions?"
+2. **Syntax / attribute lookup** → `search_schema` (Schema collection) — **try this first for any element-level question**:
+   - "What attributes does ViscoDruckerPrager take?"
+   - "Is targetRegions required for solvers?"
+   - "What is the default value of cflFactor?"
+   - "What parameters does InternalMesh accept?"
+   - Returns: the **complete attribute spec inline** (name, type, default, description for every attribute) — no `fetch_code` call needed
+   - Source: authoritative GEOS XML schema (`geos_schema.xsd`), exhaustive across all 250 element types
 
-3. **Use FetchCodeTool** to retrieve actual XML examples after finding relevant chunks
+3. **Real-world usage examples** → `search_technical` (Technical collection):
+   - "Show me a working ViscoDruckerPrager constitutive block"
+   - "Example XML for a TriaxialDriver setup"
+   - "How is SinglePhasePoromechanics typically structured?"
+   - Returns: `xml_reference` path + `line_range` markers pointing to a real example file
+   - Follow-up: call `fetch_code(xml_reference, start_marker=..., end_marker=...)` to retrieve the snippet
+
+4. **Recommended call order for writing a new XML block**:
+   1. `search_schema("<ElementName>")` → get all valid attributes and their defaults
+   2. `search_technical("<ElementName> example")` → get a real usage example for context
+   3. `fetch_code(xml_reference, ...)` → retrieve the actual XML snippet to adapt
 
 ### Common Pitfalls
 
@@ -583,7 +599,52 @@ GEOS is a powerful multiphysics simulator for geophysics applications. Key point
 
 **For implementation**: Start with tutorials, then adapt basic examples to your use case.
 
-**For questions**: Search Navigator collection for concepts, Technical collection for XML syntax, then use FetchCodeTool for actual code examples.
+**For questions**: Use `search_navigator` for conceptual/doc orientation, `search_schema` for authoritative attribute specs (no follow-up needed), `search_technical` for real usage examples, then `fetch_code` to retrieve the actual XML snippet.
+
+---
+
+## RAG Tools Reference
+
+Three ChromaDB collections are available, each serving a distinct purpose.
+
+### `search_navigator` — Conceptual navigation
+- **Source**: All `.rst` documentation files (user guide, tutorials, examples)
+- **Chunks**: One per RST document + one per section heading (~571 total)
+- **Embedding**: RST prose (title + intro/section text)
+- **Returns**: `title`, `breadcrumbs`, `source` (`.rst` path), `type` (document/section), text preview
+- **When to use**: Orient yourself — find *which* doc or section covers a topic
+- **Follow-up**: `fetch_code(source_path)` to read the raw RST if needed
+
+### `search_schema` — Authoritative attribute specs
+- **Source**: `data/geos_schema.xsd` — the GEOS XML schema generated directly from the C++ codebase
+- **Chunks**: One per XML element type (250 total, exhaustive)
+- **Embedding**: Element name + all attribute names, types, defaults, and descriptions
+- **Returns**: `element`, `attribute_count`, `spec` (full inline listing — no follow-up needed)
+- **When to use**: Any time you need to know what attributes an element accepts, their types, defaults, or what they mean
+- **Key advantage**: Exhaustive — covers all 250 element types including those with no tutorial example; answer is in the chunk itself
+
+### `search_technical` — Real usage examples
+- **Source**: `Example.rst` files that contain `literalinclude` directives pointing to XML files
+- **Chunks**: One per `literalinclude` reference (~334 total)
+- **Embedding**: RST context prose + XML tag names + key attribute values from the referenced XML
+- **Returns**: `xml_reference` (path to XML file), `line_range` (marker pair or line numbers), `breadcrumbs`, shadow text preview
+- **When to use**: See how an element is actually used in a validated simulation
+- **Follow-up**: Always call `fetch_code(xml_reference, start_marker=..., end_marker=...)` to retrieve the actual XML
+
+### Decision guide
+
+| Question type | Tool | Follow-up |
+|---|---|---|
+| "Where is X documented?" | `search_navigator` | Optional `fetch_code` on `.rst` |
+| "What attributes does X take?" | `search_schema` | None — answer is inline |
+| "What's the default for attribute Y on element X?" | `search_schema` | None |
+| "Show me a working X block" | `search_technical` | `fetch_code(xml_reference, ...)` |
+| "How is X typically structured in practice?" | `search_technical` | `fetch_code(xml_reference, ...)` |
+| "What solver handles poromechanics?" | `search_navigator` | Optional |
+
+### Exclusion during evaluation
+
+When `EXCLUDED_EXAMPLE_DIR` is set (during benchmark runs), `search_navigator` and `search_technical` silently drop results whose `source_path` matches the excluded experiment directory. `fetch_code` also blocks `.xml` and `.rst` files from that directory. `search_schema` is never filtered — it describes general GEOS syntax, not any specific example.
 
 ---
 
