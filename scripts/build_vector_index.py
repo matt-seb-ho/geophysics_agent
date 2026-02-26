@@ -74,16 +74,19 @@ def build_collection(
         documents.append(chunk["embedding_text"])
         ids.append(chunk["chunk_id"])
         
-        # Store rich metadata for retrieval
-        metadatas.append({
+        # Store rich metadata for retrieval.
+        # xml_reference is only present for technical chunks (always null in navigator).
+        meta = {
             "chunk_type": chunk["chunk_type"],
             "source_path": chunk["source_path"],
             "parent_id": chunk.get("parent_id") or "",
             "title": chunk["title"],
             "breadcrumbs": chunk["breadcrumbs"],
-            "xml_reference": chunk.get("xml_reference") or "",
             "line_range": chunk.get("line_range") or "",
-        })
+        }
+        if chunk.get("xml_reference"):
+            meta["xml_reference"] = chunk["xml_reference"]
+        metadatas.append(meta)
     
     # Add in batches
     batch_size = 50

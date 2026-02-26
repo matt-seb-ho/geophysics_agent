@@ -23,6 +23,7 @@ from src.geos_agent.constants import (
     VECTOR_DB_DIR,
     COLLECTION_NAVIGATOR,
     COLLECTION_TECHNICAL,
+    COLLECTION_SCHEMA,
 )
 
 load_dotenv()
@@ -113,16 +114,13 @@ class SearchNavigatorTool(Tool):
                         except Exception:
                             pass
                     
-                    # For excluded items, we include them but hide the xml_reference
-                    # This prevents the agent from easily fetching the full XML source
                     formatted.append({
                         "title": meta.get("title", "No Title"),
                         "breadcrumbs": meta.get("breadcrumbs", ""),
                         "type": meta.get("chunk_type", "unknown"),
                         "source": source_path,
-                        "xml_reference": None if is_excluded else meta.get("xml_reference"),
                         "preview": doc[:200] + "..." if len(doc) > 200 else doc,
-                        "is_excluded": is_excluded
+                        "is_excluded": is_excluded,
                     })
                     count += 1
 
@@ -188,7 +186,7 @@ class SearchTechnicalTool(Tool):
                     break
 
                 meta = results["metadatas"][0][i]
-                xml_ref = meta.get("xml_reference", "")
+                xml_ref = meta.get("xml_reference") or ""
                 source_path = meta.get("source_path", "")
                 is_excluded = False
 
@@ -223,6 +221,82 @@ class SearchTechnicalTool(Tool):
 
         except Exception as e:
             return {"error": f"Search failed: {str(e)}"}
+
+
+class SearchSchemaTool(Tool):
+    """Search the GEOS XML schema for element attribute specifications (Collection C)."""
+
+    name = "search_schema"
+    description = (
+        "Look up the exact attributes, types, defaults, and descriptions for any "
+        "GEOS XML element. Use this when you need to know what parameters an element "
+        "accepts, their types, default values, or what they mean. "
+        "Returns the full attribute spec for matching elements — no fetch_code needed."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Element name or attribute description to look up. "
+                    "Examples: 'ViscoDruckerPrager', 'targetRegions solver', "
+                    "'relaxation time constitutive', 'mesh nx ny nz'."
+                ),
+            },
+            "n_results": {
+                "type": "integer",
+                "description": "Number of element specs to return (default: 3).",
+            },
+        },
+        "required": ["query"],
+    }
+
+    def __init__(self):
+        self.client = chromadb.PersistentClient(path=str(VECTOR_DB_DIR))
+        self.embedding_fn = get_embedding_function()
+        self.collection = self.client.get_collection(
+            name=COLLECTION_SCHEMA,
+            embedding_function=self.embedding_fn,
+        )
+
+    def format_execution_summary(self, query: str, n_results: int = 3, **kwargs) -> str:
+        return f"looking up XML schema for '{query}' (top {n_results})"
+
+    def run(self, query: str, n_results: int = 3) -> Dict[str, Any]:
+        try:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=n_results,
+                include=["documents", "metadatas", "distances"],
+            )
+
+            formatted = []
+            for doc, meta, dist in zip(
+                results["documents"][0],
+                results["metadatas"][0],
+                results["distances"][0],
+            ):
+                # The document IS the full human-readable spec — return it directly.
+                formatted.append({
+                    "element": meta["element_name"],
+                    "title": meta["title"],
+                    "attribute_count": meta["attribute_count"],
+                    "spec": doc,          # full attribute listing
+                    "relevance": round(1 - dist, 4),
+                })
+
+            return {
+                "query": query,
+                "results": formatted,
+                "hint": (
+                    "The 'spec' field contains all attributes with types, defaults, "
+                    "and descriptions. Use this to write the XML element correctly."
+                ),
+            }
+
+        except Exception as e:
+            return {"error": f"Schema search failed: {str(e)}"}
 
 
 # Legacy compatibility: combined search

@@ -37,11 +37,16 @@ NAV_GRAPH_PATH = DATA_DIR / "nav_graph.json"
 
 # ChromaDB collection names
 COLLECTION_NAVIGATOR = "geos_navigator"  # RST prose for navigation
-COLLECTION_TECHNICAL = "geos_technical"  # XML schema/tags
+COLLECTION_TECHNICAL = "geos_technical"  # XML shadow embeddings from Example.rst literalincludes
+COLLECTION_SCHEMA    = "geos_schema"     # Per-element attribute specs parsed from XSD
 
 # Processed chunk subdirectories
 NAVIGATOR_CHUNKS_DIR = CHUNKS_DIR / "navigator"
 TECHNICAL_CHUNKS_DIR = CHUNKS_DIR / "technical"
+SCHEMA_CHUNKS_DIR    = CHUNKS_DIR / "schema"
+
+# GEOS XML schema (authoritative attribute documentation)
+SCHEMA_XSD_PATH = DATA_DIR / "geos_schema.xsd"
 
 # Ensure critical directories exist
 for path in [
@@ -52,5 +57,6 @@ for path in [
     VECTOR_DB_DIR,
     NAVIGATOR_CHUNKS_DIR,
     TECHNICAL_CHUNKS_DIR,
+    SCHEMA_CHUNKS_DIR,
 ]:
     path.mkdir(parents=True, exist_ok=True)
