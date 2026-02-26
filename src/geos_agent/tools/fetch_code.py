@@ -65,20 +65,22 @@ class FetchCodeTool(Tool):
     ) -> Dict[str, Any]:
         """Fetch code from file with optional line/marker filtering."""
         
-        # RAG Contamination Prevention: Block retrieval of XML files from excluded directories
+        # RAG Contamination Prevention: Block retrieval of XML/RST files from excluded directories
         import os
         excluded_dir = os.environ.get("EXCLUDED_EXAMPLE_DIR", "").lower().strip()
         if excluded_dir:
             try:
                 # Check extension
-                if str(file_path).lower().endswith(".xml"):
+                fp_lower = str(file_path).lower()
+                if fp_lower.endswith(".xml") or fp_lower.endswith(".rst"):
                     # Check if file path contains the excluded directory string in its parent path
                     # We use a broad check to catch various path formats (absolute/relative)
                     p = Path(file_path)
                     # Use string representation to catch directory names in path
                     if excluded_dir in str(p.parent).lower():
+                        ext = Path(file_path).suffix.lstrip(".")
                         return {
-                            "error": f"Access denied: XML files from '{excluded_dir}' are restricted during this experiment.",
+                            "error": f"Access denied: {ext.upper()} files from '{excluded_dir}' are restricted during this experiment.",
                             "file": str(file_path)
                         }
             except Exception:
