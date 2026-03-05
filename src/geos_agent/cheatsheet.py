@@ -78,7 +78,7 @@ GEOS errors encountered (error messages, stack traces) and their resolutions.
 Include the exact error string when possible so the agent can pattern-match.
 
 ### 3. TOOL USAGE STRATEGIES
-Effective RAG search queries, fetch_code patterns, shell commands, and
+Effective RAG search queries, read_file patterns, shell commands, and
 post-processing scripts that worked well.
 
 ### 4. GENERAL WORKFLOW STRATEGIES

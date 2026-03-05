@@ -23,10 +23,11 @@ DATA_DIR = PROJECT_ROOT / "data"
 # Runtime Paths (simulation inputs and outputs)
 INPUT_DIR = DATA_DIR / "inputs"
 OUTPUT_DIR = DATA_DIR / "outputs"
+MAX_READ_LINES = 500
 
 # GEOS Primer (high-level documentation summary for agent context)
 PRIMER_PATH = PROJECT_ROOT / "prompts" / "GEOS_PRIMER.md"
-SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts" / "system_prompt.md"
+SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "SYSTEM_PROMPT.md"
 
 # Dynamic cheatsheet (cross-session memory curated from past trajectories)
 CHEATSHEET_PATH = DATA_DIR / "cheatsheet.md"

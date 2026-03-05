@@ -447,7 +447,7 @@ For code contributors:
 
 > **Note on file paths below:** Paths like `inputFiles/…` and `tutorials/…`
 > are relative to the GEOS source tree (`GEOS_SOURCE_DIR`). Use the
-> `fetch_code` tool to retrieve their contents — it resolves the path
+> `read_file` tool to retrieve their contents — it resolves the path
 > automatically.
 
 ### 1. Single-Phase Flow Problem
@@ -545,14 +545,14 @@ When searching the GEOS knowledge base, three collections are available — use 
    - "How does GEOS handle multiphase flow?"
    - "Which tutorial covers hydraulic fracturing?"
    - Returns: document/section titles, breadcrumbs, source `.rst` path
-   - Follow-up: optionally call `fetch_code` on the returned `source` path to read the raw RST
+   - Follow-up: optionally call `read_file` on the returned `source` path to read the raw RST
 
 2. **Syntax / attribute lookup** → `search_schema` (Schema collection) — **try this first for any element-level question**:
    - "What attributes does ViscoDruckerPrager take?"
    - "Is targetRegions required for solvers?"
    - "What is the default value of cflFactor?"
    - "What parameters does InternalMesh accept?"
-   - Returns: the **complete attribute spec inline** (name, type, default, description for every attribute) — no `fetch_code` call needed
+   - Returns: the **complete attribute spec inline** (name, type, default, description for every attribute) — no `read_file` call needed
    - Source: authoritative GEOS XML schema (`geos_schema.xsd`), exhaustive across all 250 element types
 
 3. **Real-world usage examples** → `search_technical` (Technical collection):
@@ -560,12 +560,12 @@ When searching the GEOS knowledge base, three collections are available — use 
    - "Example XML for a TriaxialDriver setup"
    - "How is SinglePhasePoromechanics typically structured?"
    - Returns: `xml_reference` path + `line_range` markers pointing to a real example file
-   - Follow-up: call `fetch_code(xml_reference, start_marker=..., end_marker=...)` to retrieve the snippet
+   - Follow-up: call `read_file(xml_reference, start_marker=..., end_marker=...)` to retrieve the snippet
 
 4. **Recommended call order for writing a new XML block**:
    1. `search_schema("<ElementName>")` → get all valid attributes and their defaults
    2. `search_technical("<ElementName> example")` → get a real usage example for context
-   3. `fetch_code(xml_reference, ...)` → retrieve the actual XML snippet to adapt
+   3. `read_file(xml_reference, ...)` → retrieve the actual XML snippet to adapt
 
 ### Common Pitfalls
 
@@ -599,7 +599,7 @@ GEOS is a powerful multiphysics simulator for geophysics applications. Key point
 
 **For implementation**: Start with tutorials, then adapt basic examples to your use case.
 
-**For questions**: Use `search_navigator` for conceptual/doc orientation, `search_schema` for authoritative attribute specs (no follow-up needed), `search_technical` for real usage examples, then `fetch_code` to retrieve the actual XML snippet.
+**For questions**: Use `search_navigator` for conceptual/doc orientation, `search_schema` for authoritative attribute specs (no follow-up needed), `search_technical` for real usage examples, then `read_file` to retrieve the actual XML snippet.
 
 ---
 
@@ -613,7 +613,7 @@ Three ChromaDB collections are available, each serving a distinct purpose.
 - **Embedding**: RST prose (title + intro/section text)
 - **Returns**: `title`, `breadcrumbs`, `source` (`.rst` path), `type` (document/section), text preview
 - **When to use**: Orient yourself — find *which* doc or section covers a topic
-- **Follow-up**: `fetch_code(source_path)` to read the raw RST if needed
+- **Follow-up**: `read_file(source_path)` to read the raw RST if needed
 
 ### `search_schema` — Authoritative attribute specs
 - **Source**: `data/geos_schema.xsd` — the GEOS XML schema generated directly from the C++ codebase
@@ -629,22 +629,22 @@ Three ChromaDB collections are available, each serving a distinct purpose.
 - **Embedding**: RST context prose + XML tag names + key attribute values from the referenced XML
 - **Returns**: `xml_reference` (path to XML file), `line_range` (marker pair or line numbers), `breadcrumbs`, shadow text preview
 - **When to use**: See how an element is actually used in a validated simulation
-- **Follow-up**: Always call `fetch_code(xml_reference, start_marker=..., end_marker=...)` to retrieve the actual XML
+- **Follow-up**: Always call `read_file(xml_reference, start_marker=..., end_marker=...)` to retrieve the actual XML
 
 ### Decision guide
 
 | Question type | Tool | Follow-up |
 |---|---|---|
-| "Where is X documented?" | `search_navigator` | Optional `fetch_code` on `.rst` |
+| "Where is X documented?" | `search_navigator` | Optional `read_file` on `.rst` |
 | "What attributes does X take?" | `search_schema` | None — answer is inline |
 | "What's the default for attribute Y on element X?" | `search_schema` | None |
-| "Show me a working X block" | `search_technical` | `fetch_code(xml_reference, ...)` |
-| "How is X typically structured in practice?" | `search_technical` | `fetch_code(xml_reference, ...)` |
+| "Show me a working X block" | `search_technical` | `read_file(xml_reference, ...)` |
+| "How is X typically structured in practice?" | `search_technical` | `read_file(xml_reference, ...)` |
 | "What solver handles poromechanics?" | `search_navigator` | Optional |
 
 ### Exclusion during evaluation
 
-When `EXCLUDED_EXAMPLE_DIR` is set (during benchmark runs), `search_navigator` and `search_technical` silently drop results whose `source_path` matches the excluded experiment directory. `fetch_code` also blocks `.xml` and `.rst` files from that directory. `search_schema` is never filtered — it describes general GEOS syntax, not any specific example.
+When `EXCLUDED_EXAMPLE_DIR` is set (during benchmark runs), `search_navigator` and `search_technical` silently drop results whose `source_path` matches the excluded experiment directory. `read_file` also blocks `.xml` and `.rst` files from that directory. `search_schema` is never filtered — it describes general GEOS syntax, not any specific example.
 
 ---
 

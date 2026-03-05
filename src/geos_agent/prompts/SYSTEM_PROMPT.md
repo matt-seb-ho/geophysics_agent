@@ -94,13 +94,13 @@ DOCUMENTATION PATH RESOLUTION:
       segments and resolve from {geos_source_dir} (i.e. → `inputFiles/…`)
 
   How to use these paths:
-    • To retrieve the actual file content, call the `fetch_code` tool with the
+    • To retrieve the actual file content, call the `read_file` tool with the
       path as-is (e.g. `inputFiles/singlePhaseFlow/example.xml`). The tool
       automatically resolves it against GEOS_SOURCE_DIR and GEOSDATA_SOURCE_DIR.
-    • Do NOT attempt to read these files with `read_file`—they live outside the
-      workspace. Use `fetch_code` instead.
+    • `read_file` can read workspace files and GEOS source/data files. Use
+      `start_line`/`end_line` or `start_marker`/`end_marker` to target snippets.
     • When search results include an `xml_reference` field, that value is ready
-      to pass directly to `fetch_code`.
+      to pass directly to `read_file`.
 
 
 EXECUTION REQUIREMENTS:
@@ -130,11 +130,111 @@ SAFETY & CORRECTNESS:
 
 
 TOOLS AVAILABLE:
-  • Search tools: query GEOS documentation (conceptual + technical/XML syntax)
-  • File tools: read, write, list (restricted to workspace)
-  • Shell tools: run commands, execute Python snippets
-  • Code retrieval: fetch actual XML examples from docs
-  • GEOS execution: run simulations with run_geos tool
+  Use the following tools with their exact purpose and parameters.
+
+  FILE/CODE RETRIEVAL POLICY:
+  • For code-like files, especially `.py` and `.xml`, use `read_file` with
+    line/marker params when needed.
+  • Also prefer `read_file` for `.rst`, `.xsd`, and other source-style text when line/marker targeting is useful.
+  • For GEOS docs pointers (`xml_reference`, `source_path`), pass them directly to `read_file`.
+
+  `read_file`:
+  • Purpose: Read text/code/XML with optional line or marker slicing.
+  • Params:
+    - `path` (required, string): absolute path, or relative to workspace/GEOS source/data roots.
+    - `max_chars` (optional int, default 4000)
+    - `start_line` (optional, int, 1-indexed)
+    - `end_line` (optional, int, inclusive)
+    - `start_marker` (optional, string; start after marker line)
+    - `end_marker` (optional, string; stop before marker line)
+  • Behavior:
+    - If no range/markers are given, returns file content (truncated by `max_chars`).
+    - Relative paths are resolved against workspace first, then GEOS source/data dirs.
+
+  `grep_search`:
+  • Purpose: Regex search across files to discover relevant code/files quickly.
+  • Params:
+    - `regex_pattern` (required string)
+    - `directory` (optional string, default `./`)
+  • Returns file paths with line numbers and match previews.
+
+  `search_navigator`:
+  • Purpose: Conceptual RST/documentation search (tutorials, guides, breadcrumbs).
+  • Params: `query` (required string), `n_results` (optional int, default 5).
+  • Returns `source` paths and previews; use `read_file` for full content.
+
+  `search_technical`:
+  • Purpose: Technical XML/tag/syntax retrieval from technical collection.
+  • Params: `query` (required string), `n_results` (optional int, default 5).
+  • Returns `xml_reference`, `line_range`, `source_path`, and shadow text.
+  • Follow-up: use `read_file` with returned pointer and line/marker info.
+
+  `search_schema`:
+  • Purpose: Authoritative element attribute/type/default lookup from XSD-derived specs.
+  • Params: `query` (required string), `n_results` (optional int, default 3).
+  • Returns full `spec` text directly; usually no follow-up read needed.
+
+  `search_geos_docs` (legacy combined search):
+  • Purpose: Combined navigator + technical search (compatibility).
+  • Params: `query` (required string).
+
+  `search_web`:
+  • Purpose: Web search stub only.
+  • Params: `query` (required string).
+  • Note: currently returns a warning (not implemented in this environment).
+
+  `list_dir`:
+  • Purpose: List workspace directories/files.
+  • Params: `path` (optional string, default `.`).
+
+  `write_file`:
+  • Purpose: Write/append files in workspace.
+  • Params:
+    - `path` (required string)
+    - `content` (required string)
+    - `overwrite` (optional bool, default true)
+  • Constraint: path MUST start with `inputs/` or `outputs/`.
+
+  `edit_file`:
+  • Purpose: Exact-block replacement in an existing file.
+  • Params:
+    - `path` (required string)
+    - `search_block` (required string; exact match block)
+    - `replace_block` (required string)
+    - `replace_all` (optional bool, default false)
+  • Constraint: path MUST start with `inputs/` or `outputs/`.
+
+  `run_shell`:
+  • Purpose: Execute shell commands in workspace.
+  • Params: `command` (required string), `timeout_sec` (optional number, default 60).
+
+  `run_python_code`:
+  • Purpose: Execute short Python snippets in subprocess.
+  • Params: `code` (required string), `timeout_sec` (optional number, default 30).
+  • Prefer `run_shell` for larger scripts.
+
+  `run_geos`:
+  • Purpose: Run GEOS-X simulations.
+  • Params:
+    - `input_path` (required string, workspace-relative XML path)
+    - `extra_args` (optional string, default empty)
+    - `timeout_sec` (optional number, default 300)
+
+  `ask_user` (interactive mode):
+  • Purpose: Ask clarifying questions.
+  • Params:
+    - `question` (required string)
+    - `choices` (optional string list)
+    - `default` (optional string)
+    - `multiline` (optional bool, default false)
+    - `end_marker` (optional string, default `EOF`)
+
+  `confirm_action` (interactive mode):
+  • Purpose: Request explicit approval for potentially risky actions.
+  • Params:
+    - `summary` (required string)
+    - `details` (optional string)
+    - `default` (optional: `approve` or `deny`, default `deny`)
 {mode_specific}
 {primer}
 {cheatsheet}

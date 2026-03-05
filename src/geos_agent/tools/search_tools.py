@@ -127,7 +127,7 @@ class SearchNavigatorTool(Tool):
             return {
                 "query": query,
                 "results": formatted,
-                "hint": "Use fetch_code to read the full source file if needed.",
+                "hint": "Use read_file with path (+ optional line/marker params) for full source content.",
             }
 
         except Exception as e:
@@ -141,7 +141,7 @@ class SearchTechnicalTool(Tool):
     description = (
         "Search for specific XML tags, parameters, or code syntax. "
         "Use this to find exact tag names, attributes, and example usage. "
-        "Returns xml_reference pointers for lazy loading with fetch_code."
+        "Returns xml_reference pointers for lazy loading with read_file."
     )
     parameters = {
         "type": "object",
@@ -216,7 +216,7 @@ class SearchTechnicalTool(Tool):
             return {
                 "query": query,
                 "results": formatted,
-                "hint": "Use fetch_code with xml_reference and line_range to read actual XML.",
+                "hint": "Use read_file with path and start_line/end_line or markers to read actual XML.",
             }
 
         except Exception as e:
@@ -231,7 +231,7 @@ class SearchSchemaTool(Tool):
         "Look up the exact attributes, types, defaults, and descriptions for any "
         "GEOS XML element. Use this when you need to know what parameters an element "
         "accepts, their types, default values, or what they mean. "
-        "Returns the full attribute spec for matching elements — no fetch_code needed."
+        "Returns the full attribute spec for matching elements — no follow-up file read needed."
     )
     parameters = {
         "type": "object",

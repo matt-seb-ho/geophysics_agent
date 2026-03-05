@@ -2,10 +2,9 @@ from pathlib import Path
 from typing import List
 
 from .base import Tool
-from .file_tools import ReadFileTool, WriteFileTool
+from .file_tools import ReadFileTool, WriteFileTool, EditFileTool, GrepSearchTool
 from .geos_tool import RunGeosTool
 from .search_tools import SearchNavigatorTool, SearchTechnicalTool, SearchSchemaTool, SearchWebTool
-from .fetch_code import FetchCodeTool
 from .shell_tools import ListDirTool, PythonExecTool, ShellCommandTool
 from .user_io import AskUser, ConfirmAction
 
@@ -19,6 +18,8 @@ def build_default_tools(workspace_root: Path) -> List[Tool]:
     return [
         ReadFileTool(workspace_root),
         WriteFileTool(workspace_root),
+        EditFileTool(workspace_root),
+        GrepSearchTool(workspace_root),
         ListDirTool(workspace_root),
         ShellCommandTool(workspace_root),
         PythonExecTool(workspace_root),
@@ -26,7 +27,6 @@ def build_default_tools(workspace_root: Path) -> List[Tool]:
         SearchNavigatorTool(),  # RST prose for navigation
         SearchTechnicalTool(),  # XML example snippets from literalincludes
         SearchSchemaTool(),     # Authoritative per-element attribute specs from XSD
-        FetchCodeTool(),        # Lazy load code/XML
         SearchWebTool(),
         RunGeosTool(workspace_root),
         AskUser(),
