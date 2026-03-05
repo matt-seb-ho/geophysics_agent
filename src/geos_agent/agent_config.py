@@ -14,6 +14,13 @@ class AgentConfig:
 
     # Context configuration
     include_primer: bool = True  # Include GEOS_PRIMER.md in agent context at startup
+    enable_context_projection: bool = True  # Condense old context before model calls
+    context_projection_trigger_chars: int = 8000  # Trigger projection when history is large
+    context_projection_keep_recent_messages: int = 3  # Keep only a tiny raw tail
+    context_projection_summary_max_chars: int = 1500  # Max chars for compacted history summary
+    context_projection_user_max_chars: int = 2500  # Cap older user messages
+    context_projection_max_string_chars: int = 220  # Cap long strings in compacted payloads
+    context_projection_max_list_items: int = 3  # Cap list lengths in compacted payloads
 
     # Dynamic cheatsheet (cross-session memory)
     include_cheatsheet: bool = True   # Load cheatsheet into system prompt

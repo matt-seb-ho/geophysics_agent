@@ -236,6 +236,13 @@ class GeosAgent:
                     t.blocking = False
 
         self._pending_user_input: Optional[dict] = None
+        self._last_projection_stats: Dict[str, Any] = {
+            "enabled": bool(self.config.enable_context_projection),
+            "active": False,
+            "original_chars": 0,
+            "projected_chars": 0,
+            "messages_projected": 0,
+        }
 
     # ------------- logging -------------
 
@@ -312,6 +319,7 @@ class GeosAgent:
             "tool_responses": tool_responses,
             "summary": summary,
             "usage": self.client.get_token_usage(),
+            "context_projection": self._last_projection_stats,
         }
 
     # ------------- tool plumbing -------------
@@ -319,10 +327,308 @@ class GeosAgent:
     def _get_tool_specs(self) -> List[Dict[str, Any]]:
         return [t.get_spec() for t in self.tools]
 
+    @staticmethod
+    def _truncate_text(text: str, max_chars: int) -> str:
+        """Truncate text while preserving a clear omission marker."""
+        if not isinstance(text, str):
+            text = str(text)
+        if max_chars <= 0 or len(text) <= max_chars:
+            return text
+        omitted = len(text) - max_chars
+        return f"{text[:max_chars]}\n...[truncated {omitted} chars]..."
+
+    def _estimate_message_payload_chars(self, messages: List[Dict[str, Any]]) -> int:
+        """Rough payload estimator for context projection decisions."""
+        total = 0
+        for msg in messages:
+            total += len(msg.get("content", "") or "")
+            for tc in msg.get("tool_calls", []):
+                fn = tc.get("function", {}) or {}
+                total += len(fn.get("arguments", "") or "")
+        return total
+
+    def _compact_data_for_context(self, value: Any, depth: int = 0) -> Any:
+        """Recursively compact large tool payloads for model context."""
+        max_depth = 4
+        max_str = max(120, self.config.context_projection_max_string_chars)
+        max_list = max(1, self.config.context_projection_max_list_items)
+        max_dict_keys = 30
+
+        heavy_string_keys = {
+            "content",
+            "spec",
+            "shadow_text",
+            "stdout",
+            "stderr",
+            "raw",
+            "output",
+            "search_block",
+            "replace_block",
+            "code",
+        }
+
+        if depth > max_depth:
+            return "<omitted: depth limit>"
+
+        if isinstance(value, str):
+            return self._truncate_text(value, max_str)
+
+        if isinstance(value, list):
+            items = [self._compact_data_for_context(v, depth + 1) for v in value[:max_list]]
+            if len(value) > max_list:
+                items.append(f"...(+{len(value) - max_list} more)")
+            return items
+
+        if isinstance(value, dict):
+            compact: Dict[str, Any] = {}
+            for i, (key, val) in enumerate(value.items()):
+                if i >= max_dict_keys:
+                    compact["_omitted_keys"] = len(value) - max_dict_keys
+                    break
+
+                if isinstance(val, str) and key in heavy_string_keys:
+                    compact[key] = self._truncate_text(val, max_str)
+                    if len(val) > max_str:
+                        compact[f"{key}_chars"] = len(val)
+                else:
+                    compact[key] = self._compact_data_for_context(val, depth + 1)
+            return compact
+
+        return value
+
+    def _sanitize_tool_arguments_for_context(self, tool_name: str, args_str: str) -> str:
+        """Condense historical tool-call arguments (especially large write/edit payloads)."""
+        max_str = max(120, self.config.context_projection_max_string_chars)
+        try:
+            data = json.loads(args_str or "{}")
+        except Exception:
+            return self._truncate_text(args_str or "", max_str)
+
+        if not isinstance(data, dict):
+            return json.dumps(self._compact_data_for_context(data), ensure_ascii=False)
+
+        compact: Dict[str, Any] = {}
+        for key, val in data.items():
+            if key in {"content", "search_block", "replace_block", "code"} and isinstance(val, str):
+                compact[key] = f"<omitted {len(val)} chars>"
+                compact[f"{key}_preview"] = self._truncate_text(val, min(220, max_str))
+            else:
+                compact[key] = self._compact_data_for_context(val)
+
+        compact["_projection"] = f"args_condensed:{tool_name}"
+        return json.dumps(compact, ensure_ascii=False)
+
+    def _compact_tool_result_for_context(self, content: str, tool_name: Optional[str]) -> str:
+        """Condense historical tool outputs while preserving key metadata."""
+        max_str = max(120, self.config.context_projection_max_string_chars)
+
+        try:
+            parsed = json.loads(content)
+            compact = self._compact_data_for_context(parsed)
+            if isinstance(compact, dict):
+                compact["_projection"] = "result_condensed"
+                if tool_name:
+                    compact["_tool"] = tool_name
+            return json.dumps(compact, ensure_ascii=False)
+        except Exception:
+            return self._truncate_text(content, max_str)
+
+    def _project_message_for_context(
+        self,
+        msg: Dict[str, Any],
+        tool_name_by_call_id: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """Project an old message into a compact form suitable for model context."""
+        role = msg.get("role")
+
+        if role == "user":
+            max_user = max(300, self.config.context_projection_user_max_chars)
+            return {
+                "role": "user",
+                "content": self._truncate_text(msg.get("content", "") or "", max_user),
+            }
+
+        if role == "assistant":
+            max_assistant = max(400, self.config.context_projection_max_string_chars * 2)
+            projected: Dict[str, Any] = {
+                "role": "assistant",
+                "content": self._truncate_text(msg.get("content", "") or "", max_assistant),
+            }
+            if "tool_calls" in msg:
+                projected_calls = []
+                for tc in msg.get("tool_calls", []):
+                    fn = tc.get("function", {}) or {}
+                    tc_id = tc.get("id")
+                    tc_name = fn.get("name", "")
+                    if tc_id and tc_name:
+                        tool_name_by_call_id[tc_id] = tc_name
+                    projected_calls.append(
+                        {
+                            "id": tc_id,
+                            "type": "function",
+                            "function": {
+                                "name": tc_name,
+                                "arguments": self._sanitize_tool_arguments_for_context(
+                                    tc_name,
+                                    fn.get("arguments", "") or "",
+                                ),
+                            },
+                        }
+                    )
+                projected["tool_calls"] = projected_calls
+            return projected
+
+        if role == "tool":
+            tool_call_id = msg.get("tool_call_id")
+            tool_name = tool_name_by_call_id.get(tool_call_id or "")
+            return {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": self._compact_tool_result_for_context(
+                    msg.get("content", "") or "",
+                    tool_name,
+                ),
+            }
+
+        # System and any unknown role are passed through untouched.
+        return msg
+
+    def _summarize_messages_for_projection(self, messages: List[Dict[str, Any]]) -> str:
+        """Create a compact timeline summary of older conversation context."""
+        if not messages:
+            return ""
+
+        max_summary_chars = max(800, self.config.context_projection_summary_max_chars)
+        max_line_chars = max(120, self.config.context_projection_max_string_chars)
+        tool_name_by_call_id: Dict[str, str] = {}
+
+        lines = [
+            "AUTO-COMPACTED HISTORY (older context condensed):",
+            "Use this as reference for prior decisions and tool outcomes.",
+        ]
+
+        for msg in messages:
+            role = msg.get("role")
+            if role == "user":
+                text = self._truncate_text(msg.get("content", "") or "", max_line_chars)
+                lines.append(f"- User: {text}")
+            elif role == "assistant":
+                text = msg.get("content", "") or ""
+                if text:
+                    lines.append(f"- Assistant: {self._truncate_text(text, max_line_chars)}")
+                tool_calls = msg.get("tool_calls", [])
+                for tc in tool_calls[:4]:
+                    fn = tc.get("function", {}) or {}
+                    tc_id = tc.get("id")
+                    tc_name = fn.get("name", "")
+                    if tc_id and tc_name:
+                        tool_name_by_call_id[tc_id] = tc_name
+                    compact_args = self._sanitize_tool_arguments_for_context(
+                        tc_name,
+                        fn.get("arguments", "") or "",
+                    )
+                    lines.append(
+                        f"- ToolCall {tc_name}: {self._truncate_text(compact_args, max_line_chars)}"
+                    )
+                if len(tool_calls) > 4:
+                    lines.append(f"- ToolCall: ...(+{len(tool_calls) - 4} more)")
+            elif role == "tool":
+                tool_call_id = msg.get("tool_call_id")
+                tool_name = tool_name_by_call_id.get(tool_call_id or "", "tool")
+                compact_result = self._compact_tool_result_for_context(
+                    msg.get("content", "") or "",
+                    tool_name,
+                )
+                lines.append(
+                    f"- ToolResult {tool_name}: {self._truncate_text(compact_result, max_line_chars)}"
+                )
+
+            # Early exit if we already exceeded the target summary size
+            if sum(len(line) + 1 for line in lines) > max_summary_chars:
+                lines.append("- ...[older events truncated in summary]...")
+                break
+
+        return self._truncate_text("\n".join(lines), max_summary_chars)
+
+    def _build_model_messages(self) -> List[Dict[str, Any]]:
+        """Build projected messages for the model while keeping raw history for logging."""
+        if not self.config.enable_context_projection:
+            self._last_projection_stats = {
+                "enabled": False,
+                "active": False,
+                "original_chars": self._estimate_message_payload_chars(self.messages),
+                "projected_chars": self._estimate_message_payload_chars(self.messages),
+                "messages_projected": 0,
+            }
+            return self.messages
+
+        original_chars = self._estimate_message_payload_chars(self.messages)
+        trigger = max(0, self.config.context_projection_trigger_chars)
+        if original_chars < trigger:
+            self._last_projection_stats = {
+                "enabled": True,
+                "active": False,
+                "original_chars": original_chars,
+                "projected_chars": original_chars,
+                "messages_projected": 0,
+            }
+            return self.messages
+
+        keep_recent = max(0, self.config.context_projection_keep_recent_messages)
+        cutoff = max(1, len(self.messages) - keep_recent)
+        tool_name_by_call_id: Dict[str, str] = {}
+        projected: List[Dict[str, Any]] = []
+        projected_count = 0
+        recent_compact_window = 2
+
+        system_message = self.messages[0]
+        older_messages = self.messages[1:cutoff]
+        recent_messages = self.messages[cutoff:]
+
+        # Pre-register tool names for consistent tool-result labeling.
+        for msg in self.messages:
+            if msg.get("role") == "assistant":
+                for tc in msg.get("tool_calls", []):
+                    fn = tc.get("function", {}) or {}
+                    tc_id = tc.get("id")
+                    tc_name = fn.get("name", "")
+                    if tc_id and tc_name:
+                        tool_name_by_call_id[tc_id] = tc_name
+
+        projected.append(system_message)
+
+        summary_text = self._summarize_messages_for_projection(older_messages)
+        if summary_text:
+            projected.append({"role": "assistant", "content": summary_text})
+            projected_count += len(older_messages)
+
+        # Keep only a tiny raw tail; compact the rest of the recent window.
+        for idx, msg in enumerate(recent_messages):
+            if idx < max(0, len(recent_messages) - recent_compact_window):
+                projected.append(self._project_message_for_context(msg, tool_name_by_call_id))
+                projected_count += 1
+            else:
+                projected.append(msg)
+
+        projected_chars = self._estimate_message_payload_chars(projected)
+        self._last_projection_stats = {
+            "enabled": True,
+            "active": True,
+            "original_chars": original_chars,
+            "projected_chars": projected_chars,
+            "messages_projected": projected_count,
+            "keep_recent_messages": keep_recent,
+            "summary_chars": len(summary_text),
+        }
+        return projected
+
     def _call_model_streaming(self) -> tuple[str, List[Any], Dict[str, int]]:
         """Call LLM with streaming. All API details handled by client."""
+        model_messages = self._build_model_messages()
+        if self._last_projection_stats.get("active"):
+            self._log("context_projection", **self._last_projection_stats)
         return self.client.chat_completion_streaming(
-            messages=self.messages,
+            messages=model_messages,
             tools=self._get_tool_specs(),
             model=self.config.model,
             temperature=self.config.temperature,

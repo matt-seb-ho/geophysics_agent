@@ -9,6 +9,7 @@ Run with:
 
 import os
 import tempfile
+import json
 from pathlib import Path
 
 import streamlit as st
@@ -43,11 +44,17 @@ TOOL_ICONS = {
 
 AVAILABLE_MODELS = [
     "moonshotai/kimi-k2.5",
-    "anthropic/claude-sonnet-4-20250514",
-    "google/gemini-2.5-flash",
-    "openai/gpt-4o",
-    "deepseek/deepseek-v3.2",
     "z-ai/glm-5",
+    "anthropic/claude-sonnet-4.6",
+    "openai/gpt-5.2",
+    "google/gemini-3.1-pro-preview",
+    "openai/gpt-5.3-codex",
+    "deepseek/deepseek-v3.2",
+    "openai/gpt-5-mini",
+    "anthropic/claude-haiku-4.5",
+    "qwen/qwen3-coder-next",
+    "google/gemini-3-flash-preview",
+    "google/gemini-3.1-flash-lite-preview",
 ]
 
 # ---------------------------------------------------------------------------
@@ -96,6 +103,25 @@ if "agent_provider" not in st.session_state:
 if "agent_max_steps" not in st.session_state:
     st.session_state.agent_max_steps = 100
 
+if "enable_conversation_logging" not in st.session_state:
+    st.session_state.enable_conversation_logging = False
+
+if "conversation_log_dir" not in st.session_state:
+    st.session_state.conversation_log_dir = str(PROJECT_ROOT / "data" / "eval" / "jsonl_logs")
+
+if "last_conversation_log_path" not in st.session_state:
+    st.session_state.last_conversation_log_path = ""
+
+if "last_conversation_log_error" not in st.session_state:
+    st.session_state.last_conversation_log_error = ""
+
+if "token_usage" not in st.session_state:
+    st.session_state.token_usage = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
+
 # Default workspace: a fresh temp directory that persists for the session
 if "workspace_path" not in st.session_state:
     _tmp = tempfile.mkdtemp(prefix="geophysicist_ai_")
@@ -124,6 +150,23 @@ with st.sidebar:
         help="Force OpenRouter to route to a specific hosting provider.",
     )
     max_steps = st.slider("Max steps per turn", 10, 200, 100, key="sidebar_max_steps")
+    enable_logging = st.checkbox(
+        "Save conversation log (.jsonl)",
+        key="sidebar_enable_logging",
+        value=st.session_state.enable_conversation_logging,
+        help=(
+            "Write the structured conversation log after each turn in a format "
+            "compatible with scripts/eval/compute_agent_metrics.py."
+        ),
+    )
+    log_dir = st.text_input(
+        "Log directory",
+        key="sidebar_log_dir",
+        value=st.session_state.conversation_log_dir,
+        help="Directory for conversation logs.",
+    )
+    st.session_state.enable_conversation_logging = enable_logging
+    st.session_state.conversation_log_dir = log_dir
 
     st.divider()
 
@@ -144,23 +187,53 @@ with st.sidebar:
         else:
             st.error("Directory does not exist.")
 
+    if st.session_state.enable_conversation_logging:
+        _workspace_name = Path(st.session_state.workspace_path).resolve().name
+        _log_name = f"{_workspace_name}.jsonl"
+        st.caption(f"Log file name: `{_log_name}`")
+        if st.session_state.last_conversation_log_path:
+            st.caption(f"Last saved: `{st.session_state.last_conversation_log_path}`")
+        if st.session_state.last_conversation_log_error:
+            st.warning(st.session_state.last_conversation_log_error)
+
     st.divider()
 
     if st.button("\U0001f5d1\ufe0f  New Chat", use_container_width=True):
         st.session_state.messages = []
         st.session_state.agent = None
         st.session_state.pending_input = None
+        st.session_state.token_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
         st.rerun()
 
-    # Token usage
+    # Token usage (always visible)
     if st.session_state.agent is not None:
         usage = st.session_state.agent.client.get_token_usage()
-        if usage["total_tokens"] > 0:
-            st.divider()
-            st.caption("\U0001f4ca Token Usage")
-            c1, c2 = st.columns(2)
-            c1.metric("Input", f"{usage['prompt_tokens']:,}")
-            c2.metric("Output", f"{usage['completion_tokens']:,}")
+        st.session_state.token_usage = {
+            "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+            "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+            "total_tokens": int(usage.get("total_tokens", 0) or 0),
+        }
+    elif not st.session_state.messages:
+        st.session_state.token_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
+
+    st.divider()
+    st.caption("\U0001f4ca Token Usage")
+    _usage = st.session_state.token_usage
+    _tok_c1, _tok_c2, _tok_c3 = st.columns(3)
+    _tok_in_ph = _tok_c1.empty()
+    _tok_out_ph = _tok_c2.empty()
+    _tok_total_ph = _tok_c3.empty()
+    _tok_in_ph.metric("Input", f"{_usage['prompt_tokens']:,}")
+    _tok_out_ph.metric("Output", f"{_usage['completion_tokens']:,}")
+    _tok_total_ph.metric("Total", f"{_usage['total_tokens']:,}")
 
 # ---------------------------------------------------------------------------
 # Agent factory
@@ -197,6 +270,38 @@ def get_agent() -> GeosAgent:
     if st.session_state.agent is None:
         st.session_state.agent = _create_agent()
     return st.session_state.agent
+
+
+def _sanitize_log_stem(name: str) -> str:
+    """Create a filesystem-safe stem for log filenames."""
+    safe = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in name)
+    return safe.strip("._") or "workspace"
+
+
+def _save_conversation_log_if_enabled(agent: GeosAgent) -> None:
+    """Persist conversation log as JSON payload in a .jsonl file."""
+    if not st.session_state.get("enable_conversation_logging", False):
+        return
+
+    raw_dir = st.session_state.get("conversation_log_dir", "").strip()
+    if not raw_dir:
+        raw_dir = str(PROJECT_ROOT / "data" / "eval" / "jsonl_logs")
+
+    log_dir = Path(raw_dir).expanduser().resolve()
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    workspace_name = Path(st.session_state.workspace_path).resolve().name
+    file_stem = _sanitize_log_stem(workspace_name)
+    log_path = log_dir / f"{file_stem}.jsonl"
+
+    try:
+        log_data = agent._get_conversation_log()
+        with log_path.open("w", encoding="utf-8") as f:
+            json.dump(log_data, f, indent=2, ensure_ascii=False)
+        st.session_state.last_conversation_log_path = str(log_path)
+        st.session_state.last_conversation_log_error = ""
+    except Exception as e:
+        st.session_state.last_conversation_log_error = f"Failed to save log: {e}"
 
 
 # ---------------------------------------------------------------------------
@@ -490,3 +595,15 @@ if prompt := st.chat_input(_chat_placeholder):
 
     # ---- Persist assistant message ----
     st.session_state.messages.append({"role": "assistant", "parts": _parts})
+    _save_conversation_log_if_enabled(agent)
+
+    # ---- Refresh token usage immediately after the turn ----
+    _live_usage = agent.client.get_token_usage()
+    st.session_state.token_usage = {
+        "prompt_tokens": int(_live_usage.get("prompt_tokens", 0) or 0),
+        "completion_tokens": int(_live_usage.get("completion_tokens", 0) or 0),
+        "total_tokens": int(_live_usage.get("total_tokens", 0) or 0),
+    }
+    _tok_in_ph.metric("Input", f"{st.session_state.token_usage['prompt_tokens']:,}")
+    _tok_out_ph.metric("Output", f"{st.session_state.token_usage['completion_tokens']:,}")
+    _tok_total_ph.metric("Total", f"{st.session_state.token_usage['total_tokens']:,}")

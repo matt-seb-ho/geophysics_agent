@@ -133,9 +133,15 @@ TOOLS AVAILABLE:
   Use the following tools with their exact purpose and parameters.
 
   FILE/CODE RETRIEVAL POLICY:
-  • For code-like files, especially `.py` and `.xml`, use `read_file` with
-    line/marker params when needed.
-  • Also prefer `read_file` for `.rst`, `.xsd`, and other source-style text when line/marker targeting is useful.
+  • Retrieval order: line-targeted read first, full-file read last.
+  • When DB/search output includes line hints (e.g., `line_range` from `search_technical`),
+    use those line numbers directly in `read_file(start_line=..., end_line=...)`.
+  • If line hints are missing or uncertain, run `grep_search` first to isolate relevant
+    lines, then call `read_file` for a tight line window around those matches.
+  • For code-like files, especially `.py` and `.xml`, prefer line/marker-targeted reads.
+  • Also prefer targeted `read_file` for `.rst`, `.xsd`, and other source-style text.
+  • Only read large/full file spans (`read_file` with no line bounds and high `max_chars`)
+    as a fallback when targeted retrieval cannot locate the needed content.
   • For GEOS docs pointers (`xml_reference`, `source_path`), pass them directly to `read_file`.
 
   `read_file`:
@@ -167,7 +173,8 @@ TOOLS AVAILABLE:
   • Purpose: Technical XML/tag/syntax retrieval from technical collection.
   • Params: `query` (required string), `n_results` (optional int, default 5).
   • Returns `xml_reference`, `line_range`, `source_path`, and shadow text.
-  • Follow-up: use `read_file` with returned pointer and line/marker info.
+  • Follow-up: use `read_file` with returned pointer and `line_range` first; if needed,
+    use `grep_search` to refine line numbers before additional `read_file` calls.
 
   `search_schema`:
   • Purpose: Authoritative element attribute/type/default lookup from XSD-derived specs.
