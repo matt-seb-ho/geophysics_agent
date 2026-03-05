@@ -25,7 +25,8 @@ INPUT_DIR = DATA_DIR / "inputs"
 OUTPUT_DIR = DATA_DIR / "outputs"
 
 # GEOS Primer (high-level documentation summary for agent context)
-PRIMER_PATH = PROJECT_ROOT / "GEOS_PRIMER.md"
+PRIMER_PATH = PROJECT_ROOT / "prompts" / "GEOS_PRIMER.md"
+SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts" / "system_prompt.md"
 
 # Dynamic cheatsheet (cross-session memory curated from past trajectories)
 CHEATSHEET_PATH = DATA_DIR / "cheatsheet.md"

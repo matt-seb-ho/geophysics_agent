@@ -5,6 +5,7 @@ from typing import Optional
 @dataclass
 class AgentConfig:
     model: str = "moonshotai/kimi-k2.5"  # OpenRouter model
+    provider: Optional[str] = None  # OpenRouter provider override (e.g. "baseten", "novita")
     temperature: float = 0.2
     max_tokens: int = 50000
     max_steps: int = 100  # Increased from 20 to prevent premature termination

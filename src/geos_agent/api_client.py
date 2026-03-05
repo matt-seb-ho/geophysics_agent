@@ -260,6 +260,7 @@ class OpenRouterClient:
         max_tokens: int = 50000,
         reasoning: bool = True,
         tool_choice: str = "auto",
+        provider: Optional[str] = None,
     ) -> tuple[str, list, dict]:
         """
         Make a streaming chat completion call and parse the response.
@@ -287,10 +288,12 @@ class OpenRouterClient:
         """
 
         def _make_streaming_call():
-            # Build extra body for reasoning models
+            # Build extra body for reasoning models and provider routing
             extra_body = {}
             if reasoning:
                 extra_body["reasoning"] = {"enabled": True}
+            if provider:
+                extra_body["provider"] = {"order": [provider]}
 
             stream = self.client.chat.completions.create(
                 model=model,

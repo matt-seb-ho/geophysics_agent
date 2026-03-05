@@ -47,6 +47,7 @@ AVAILABLE_MODELS = [
     "google/gemini-2.5-flash",
     "openai/gpt-4o",
     "deepseek/deepseek-v3.2",
+    "z-ai/glm-5",
 ]
 
 # ---------------------------------------------------------------------------
@@ -89,6 +90,9 @@ if "agent" not in st.session_state:
 if "agent_model" not in st.session_state:
     st.session_state.agent_model = AVAILABLE_MODELS[0]
 
+if "agent_provider" not in st.session_state:
+    st.session_state.agent_provider = ""
+
 if "agent_max_steps" not in st.session_state:
     st.session_state.agent_max_steps = 100
 
@@ -113,6 +117,12 @@ with st.sidebar:
     st.divider()
 
     model = st.selectbox("Model", AVAILABLE_MODELS, key="sidebar_model")
+    provider_override = st.text_input(
+        "Provider override",
+        key="sidebar_provider",
+        placeholder="e.g. baseten, novita, together (optional)",
+        help="Force OpenRouter to route to a specific hosting provider.",
+    )
     max_steps = st.slider("Max steps per turn", 10, 200, 100, key="sidebar_max_steps")
 
     st.divider()
@@ -163,6 +173,7 @@ def _create_agent() -> GeosAgent:
     tools = build_default_tools(workspace_root)
     config = AgentConfig(
         model=st.session_state.get("sidebar_model", AVAILABLE_MODELS[0]),
+        provider=st.session_state.get("sidebar_provider") or None,
         max_steps=st.session_state.get("sidebar_max_steps", 100),
         mode="interactive",
     )

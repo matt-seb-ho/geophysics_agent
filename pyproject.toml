@@ -21,6 +21,9 @@ geos-agent = "geos_agent.main:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+geos_agent = ["prompts/*.md"]
+
 [tool.uv]
 package = true
 
