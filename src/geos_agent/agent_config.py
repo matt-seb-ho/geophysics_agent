@@ -7,9 +7,14 @@ class AgentConfig:
     model: str = "moonshotai/kimi-k2.5"  # OpenRouter model
     provider: Optional[str] = None  # OpenRouter provider override (e.g. "baseten", "novita")
     temperature: float = 0.2
+    top_p: float = 1.0
+    frequency_penalty: float = 0.0
+    presence_penalty: float = 0.0
+    seed: Optional[int] = None
     max_tokens: int = 50000
     max_steps: int = 100  # Increased from 20 to prevent premature termination
     reasoning: bool = True
+    openrouter_extra_body: dict = field(default_factory=dict)
     mode: str = "auto"  # "auto" or "interactive"
 
     # Context configuration
