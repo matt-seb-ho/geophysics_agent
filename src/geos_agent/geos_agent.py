@@ -632,10 +632,15 @@ class GeosAgent:
             tools=self._get_tool_specs(),
             model=self.config.model,
             temperature=self.config.temperature,
+            top_p=self.config.top_p,
+            frequency_penalty=self.config.frequency_penalty,
+            presence_penalty=self.config.presence_penalty,
+            seed=self.config.seed,
             max_tokens=self.config.max_tokens,
             reasoning=self.config.reasoning,
             tool_choice="auto",
             provider=self.config.provider or None,
+            openrouter_extra_body=self.config.openrouter_extra_body,
         )
 
 

@@ -57,6 +57,8 @@ AVAILABLE_MODELS = [
     "google/gemini-3.1-flash-lite-preview",
 ]
 
+MODEL_PRESET_OPTIONS = ["Custom"] + AVAILABLE_MODELS
+
 # ---------------------------------------------------------------------------
 # Page config (must be first Streamlit command)
 # ---------------------------------------------------------------------------
@@ -94,11 +96,47 @@ if "messages" not in st.session_state:
 if "agent" not in st.session_state:
     st.session_state.agent = None
 
+if "agent_settings_snapshot" not in st.session_state:
+    st.session_state.agent_settings_snapshot = None
+
 if "agent_model" not in st.session_state:
     st.session_state.agent_model = AVAILABLE_MODELS[0]
 
 if "agent_provider" not in st.session_state:
     st.session_state.agent_provider = ""
+
+if "sidebar_model_preset" not in st.session_state:
+    st.session_state.sidebar_model_preset = AVAILABLE_MODELS[0]
+
+if "sidebar_model_name" not in st.session_state:
+    st.session_state.sidebar_model_name = AVAILABLE_MODELS[0]
+
+if "sidebar_provider" not in st.session_state:
+    st.session_state.sidebar_provider = ""
+
+if "sidebar_reasoning" not in st.session_state:
+    st.session_state.sidebar_reasoning = True
+
+if "sidebar_temperature" not in st.session_state:
+    st.session_state.sidebar_temperature = 0.2
+
+if "sidebar_top_p" not in st.session_state:
+    st.session_state.sidebar_top_p = 1.0
+
+if "sidebar_frequency_penalty" not in st.session_state:
+    st.session_state.sidebar_frequency_penalty = 0.0
+
+if "sidebar_presence_penalty" not in st.session_state:
+    st.session_state.sidebar_presence_penalty = 0.0
+
+if "sidebar_seed" not in st.session_state:
+    st.session_state.sidebar_seed = ""
+
+if "sidebar_max_tokens" not in st.session_state:
+    st.session_state.sidebar_max_tokens = 50000
+
+if "sidebar_openrouter_extra_body" not in st.session_state:
+    st.session_state.sidebar_openrouter_extra_body = ""
 
 if "agent_max_steps" not in st.session_state:
     st.session_state.agent_max_steps = 100
@@ -133,6 +171,70 @@ if "workspace_path" not in st.session_state:
 if "pending_input" not in st.session_state:
     st.session_state.pending_input = None
 
+
+def _normalize_model_preset(model_name: str) -> str:
+    return model_name if model_name in AVAILABLE_MODELS else "Custom"
+
+
+def _parse_seed(value: str) -> int | None:
+    raw = value.strip()
+    if not raw:
+        return None
+    return int(raw)
+
+
+def _parse_openrouter_extra_body(raw_value: str) -> tuple[dict, str | None]:
+    raw = raw_value.strip()
+    if not raw:
+        return {}, None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return {}, f"Advanced OpenRouter JSON is invalid: {exc}"
+    if not isinstance(parsed, dict):
+        return {}, "Advanced OpenRouter JSON must be a JSON object."
+    return parsed, None
+
+
+def _get_sidebar_model_name() -> str:
+    return (st.session_state.get("sidebar_model_name") or AVAILABLE_MODELS[0]).strip()
+
+
+def _get_current_agent_settings() -> tuple[dict, str | None]:
+    model_name = _get_sidebar_model_name()
+    if not model_name:
+        return {}, "Model name cannot be empty."
+
+    try:
+        seed = _parse_seed(st.session_state.get("sidebar_seed", ""))
+    except ValueError:
+        return {}, "Seed must be a whole number."
+
+    extra_body, extra_body_error = _parse_openrouter_extra_body(
+        st.session_state.get("sidebar_openrouter_extra_body", "")
+    )
+    if extra_body_error:
+        return {}, extra_body_error
+
+    settings = {
+        "model": model_name,
+        "provider": (st.session_state.get("sidebar_provider") or "").strip() or None,
+        "reasoning": bool(st.session_state.get("sidebar_reasoning", True)),
+        "temperature": float(st.session_state.get("sidebar_temperature", 0.2)),
+        "top_p": float(st.session_state.get("sidebar_top_p", 1.0)),
+        "frequency_penalty": float(
+            st.session_state.get("sidebar_frequency_penalty", 0.0)
+        ),
+        "presence_penalty": float(
+            st.session_state.get("sidebar_presence_penalty", 0.0)
+        ),
+        "seed": seed,
+        "max_tokens": int(st.session_state.get("sidebar_max_tokens", 50000)),
+        "max_steps": int(st.session_state.get("sidebar_max_steps", 100)),
+        "openrouter_extra_body": extra_body,
+    }
+    return settings, None
+
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
@@ -142,13 +244,104 @@ with st.sidebar:
     st.caption("AI Agent for GEOS Simulations")
     st.divider()
 
-    model = st.selectbox("Model", AVAILABLE_MODELS, key="sidebar_model")
-    provider_override = st.text_input(
-        "Provider override",
-        key="sidebar_provider",
-        placeholder="e.g. baseten, novita, together (optional)",
-        help="Force OpenRouter to route to a specific hosting provider.",
+    st.subheader("Model")
+    st.selectbox(
+        "Preset",
+        MODEL_PRESET_OPTIONS,
+        key="sidebar_model_preset",
+        index=MODEL_PRESET_OPTIONS.index(
+            _normalize_model_preset(st.session_state.sidebar_model_name)
+        ),
+        help="Pick a common model preset or switch to Custom for any OpenRouter model ID.",
     )
+    if st.session_state.sidebar_model_preset != "Custom":
+        st.session_state.sidebar_model_name = st.session_state.sidebar_model_preset
+    st.text_input(
+        "Model name",
+        key="sidebar_model_name",
+        placeholder="e.g. openai/gpt-5.3-codex",
+        help="Exact OpenRouter model ID used for requests.",
+    )
+    with st.expander("Advanced model options", expanded=False):
+        st.text_input(
+            "Provider override",
+            key="sidebar_provider",
+            placeholder="e.g. baseten, novita, together",
+            help="Route the request to a specific OpenRouter provider.",
+        )
+        st.checkbox(
+            "Enable reasoning",
+            key="sidebar_reasoning",
+            help="Request reasoning tokens for models/providers that support them.",
+        )
+        st.slider(
+            "Temperature",
+            min_value=0.0,
+            max_value=2.0,
+            value=st.session_state.sidebar_temperature,
+            step=0.05,
+            key="sidebar_temperature",
+        )
+        st.slider(
+            "Top p",
+            min_value=0.0,
+            max_value=1.0,
+            value=st.session_state.sidebar_top_p,
+            step=0.05,
+            key="sidebar_top_p",
+        )
+        st.slider(
+            "Frequency penalty",
+            min_value=-2.0,
+            max_value=2.0,
+            value=st.session_state.sidebar_frequency_penalty,
+            step=0.1,
+            key="sidebar_frequency_penalty",
+        )
+        st.slider(
+            "Presence penalty",
+            min_value=-2.0,
+            max_value=2.0,
+            value=st.session_state.sidebar_presence_penalty,
+            step=0.1,
+            key="sidebar_presence_penalty",
+        )
+        st.text_input(
+            "Seed",
+            key="sidebar_seed",
+            placeholder="Optional integer",
+            help="Optional deterministic seed for models that support it.",
+        )
+        st.number_input(
+            "Max output tokens",
+            min_value=1,
+            max_value=200000,
+            value=st.session_state.sidebar_max_tokens,
+            step=1000,
+            key="sidebar_max_tokens",
+            help="Upper bound for generated output tokens.",
+        )
+        st.text_area(
+            "Extra OpenRouter JSON",
+            key="sidebar_openrouter_extra_body",
+            height=140,
+            placeholder='{"provider":{"allow_fallbacks":false},"transforms":["middle-out"]}',
+            help=(
+                "Optional JSON object merged into OpenRouter's extra request body. "
+                "Use this for provider routing and other OpenRouter-specific flags "
+                "not exposed above."
+            ),
+        )
+        _, _advanced_error = _get_current_agent_settings()
+        if _advanced_error:
+            st.error(_advanced_error)
+    _current_settings, _settings_error = _get_current_agent_settings()
+    if (
+        not _settings_error
+        and st.session_state.agent is not None
+        and st.session_state.agent_settings_snapshot != _current_settings
+    ):
+        st.info("Model changes apply on the next New Chat.")
     max_steps = st.slider("Max steps per turn", 10, 200, 100, key="sidebar_max_steps")
     enable_logging = st.checkbox(
         "Save conversation log (.jsonl)",
@@ -244,10 +437,21 @@ def _create_agent() -> GeosAgent:
     """Create a fresh agent with current sidebar settings."""
     workspace_root = Path(st.session_state.workspace_path).resolve()
     tools = build_default_tools(workspace_root)
+    settings, settings_error = _get_current_agent_settings()
+    if settings_error:
+        raise ValueError(settings_error)
     config = AgentConfig(
-        model=st.session_state.get("sidebar_model", AVAILABLE_MODELS[0]),
-        provider=st.session_state.get("sidebar_provider") or None,
-        max_steps=st.session_state.get("sidebar_max_steps", 100),
+        model=settings["model"],
+        provider=settings["provider"],
+        temperature=settings["temperature"],
+        top_p=settings["top_p"],
+        frequency_penalty=settings["frequency_penalty"],
+        presence_penalty=settings["presence_penalty"],
+        seed=settings["seed"],
+        max_tokens=settings["max_tokens"],
+        max_steps=settings["max_steps"],
+        reasoning=settings["reasoning"],
+        openrouter_extra_body=settings["openrouter_extra_body"],
         mode="interactive",
     )
     agent = GeosAgent(
@@ -263,6 +467,7 @@ def _create_agent() -> GeosAgent:
         if hasattr(t, "blocking"):
             t.blocking = False
     agent.start_session()
+    st.session_state.agent_settings_snapshot = settings
     return agent
 
 

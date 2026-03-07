@@ -257,10 +257,15 @@ class OpenRouterClient:
         tools: Optional[list] = None,
         model: str = "moonshotai/kimi-k2.5",
         temperature: float = 0.2,
+        top_p: float = 1.0,
+        frequency_penalty: float = 0.0,
+        presence_penalty: float = 0.0,
+        seed: Optional[int] = None,
         max_tokens: int = 50000,
         reasoning: bool = True,
         tool_choice: str = "auto",
         provider: Optional[str] = None,
+        openrouter_extra_body: Optional[dict[str, Any]] = None,
     ) -> tuple[str, list, dict]:
         """
         Make a streaming chat completion call and parse the response.
@@ -277,6 +282,10 @@ class OpenRouterClient:
             tools: Optional list of tool specifications
             model: Model identifier
             temperature: Sampling temperature
+            top_p: Nucleus sampling parameter
+            frequency_penalty: Frequency penalty
+            presence_penalty: Presence penalty
+            seed: Optional deterministic seed
             max_tokens: Maximum tokens to generate
             reasoning: Enable reasoning for supported models
             tool_choice: Tool choice strategy ("auto", "none", or specific tool)
@@ -289,7 +298,7 @@ class OpenRouterClient:
 
         def _make_streaming_call():
             # Build extra body for reasoning models and provider routing
-            extra_body = {}
+            extra_body = dict(openrouter_extra_body or {})
             if reasoning:
                 extra_body["reasoning"] = {"enabled": True}
             if provider:
@@ -300,6 +309,10 @@ class OpenRouterClient:
                 messages=messages,
                 tools=tools or [],
                 temperature=temperature,
+                top_p=top_p,
+                frequency_penalty=frequency_penalty,
+                presence_penalty=presence_penalty,
+                seed=seed,
                 max_tokens=max_tokens,
                 stream=True,
                 stream_options={"include_usage": True},
