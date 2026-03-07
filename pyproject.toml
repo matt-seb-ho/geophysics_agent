@@ -10,6 +10,9 @@ dependencies = [
     "pandas>=2.0.0",
     "python-dotenv",
     "scipy>=1.10.0",
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.9",
     "streamlit>=1.45.0",
     "lxml>=5.0.0",
 ]
@@ -17,6 +20,7 @@ dependencies = [
 [project.scripts]
 # geos-agent = "geos_agent.tools.tools:main"
 geos-agent = "geos_agent.main:main"
+geos-agent-gui = "geos_agent.gui_runner:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
