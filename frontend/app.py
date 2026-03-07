@@ -26,6 +26,8 @@ from geos_agent.tools.utils import build_default_tools
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
+DEFAULT_SHARED_LOG_DIR = PROJECT_ROOT / "data" / "eval" / "jsonl_logs"
+DEFAULT_LOCAL_LOG_DIR = PROJECT_ROOT / ".streamlit" / "jsonl_logs"
 
 TOOL_ICONS = {
     "search_navigator": "\U0001f50d",
@@ -105,9 +107,6 @@ if "agent_model" not in st.session_state:
 if "agent_provider" not in st.session_state:
     st.session_state.agent_provider = ""
 
-if "sidebar_model_preset" not in st.session_state:
-    st.session_state.sidebar_model_preset = AVAILABLE_MODELS[0]
-
 if "sidebar_model_name" not in st.session_state:
     st.session_state.sidebar_model_name = AVAILABLE_MODELS[0]
 
@@ -145,7 +144,7 @@ if "enable_conversation_logging" not in st.session_state:
     st.session_state.enable_conversation_logging = False
 
 if "conversation_log_dir" not in st.session_state:
-    st.session_state.conversation_log_dir = str(PROJECT_ROOT / "data" / "eval" / "jsonl_logs")
+    st.session_state.conversation_log_dir = str(DEFAULT_SHARED_LOG_DIR)
 
 if "last_conversation_log_path" not in st.session_state:
     st.session_state.last_conversation_log_path = ""
@@ -244,24 +243,25 @@ with st.sidebar:
     st.caption("AI Agent for GEOS Simulations")
     st.divider()
 
-    st.subheader("Model")
+    if "sidebar_model_preset" not in st.session_state:
+        st.session_state.sidebar_model_preset = _normalize_model_preset(
+            st.session_state.sidebar_model_name
+        )
     st.selectbox(
         "Preset",
         MODEL_PRESET_OPTIONS,
         key="sidebar_model_preset",
-        index=MODEL_PRESET_OPTIONS.index(
-            _normalize_model_preset(st.session_state.sidebar_model_name)
-        ),
         help="Pick a common model preset or switch to Custom for any OpenRouter model ID.",
     )
     if st.session_state.sidebar_model_preset != "Custom":
         st.session_state.sidebar_model_name = st.session_state.sidebar_model_preset
-    st.text_input(
-        "Model name",
-        key="sidebar_model_name",
-        placeholder="e.g. openai/gpt-5.3-codex",
-        help="Exact OpenRouter model ID used for requests.",
-    )
+    else:
+        st.text_input(
+            "Model name",
+            key="sidebar_model_name",
+            placeholder="e.g. openai/gpt-5.3-codex",
+            help="Exact OpenRouter model ID used for requests.",
+        )
     with st.expander("Advanced model options", expanded=False):
         st.text_input(
             "Provider override",
@@ -342,7 +342,10 @@ with st.sidebar:
         and st.session_state.agent_settings_snapshot != _current_settings
     ):
         st.info("Model changes apply on the next New Chat.")
+    st.divider()
     max_steps = st.slider("Max steps per turn", 10, 200, 100, key="sidebar_max_steps")
+
+    st.divider()
     enable_logging = st.checkbox(
         "Save conversation log (.jsonl)",
         key="sidebar_enable_logging",
@@ -363,7 +366,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Workspace selector
     new_workspace = st.text_input(
         "Workspace directory",
         value=st.session_state.workspace_path,
@@ -418,7 +420,6 @@ with st.sidebar:
         }
 
     st.divider()
-    st.caption("\U0001f4ca Token Usage")
     _usage = st.session_state.token_usage
     _tok_c1, _tok_c2, _tok_c3 = st.columns(3)
     _tok_in_ph = _tok_c1.empty()
@@ -483,17 +484,40 @@ def _sanitize_log_stem(name: str) -> str:
     return safe.strip("._") or "workspace"
 
 
+def _resolve_log_dir(raw_dir: str) -> tuple[Path | None, str]:
+    """Resolve a writable directory for conversation logs."""
+    requested_dir = Path(raw_dir).expanduser() if raw_dir else DEFAULT_SHARED_LOG_DIR
+
+    for candidate in (requested_dir, DEFAULT_LOCAL_LOG_DIR):
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            return candidate.resolve(), ""
+        except OSError:
+            continue
+
+    return None, (
+        "Failed to save log: neither the configured log directory nor the local "
+        f"fallback is writable. Tried `{requested_dir}` and `{DEFAULT_LOCAL_LOG_DIR}`."
+    )
+
+
 def _save_conversation_log_if_enabled(agent: GeosAgent) -> None:
     """Persist conversation log as JSON payload in a .jsonl file."""
     if not st.session_state.get("enable_conversation_logging", False):
         return
 
     raw_dir = st.session_state.get("conversation_log_dir", "").strip()
-    if not raw_dir:
-        raw_dir = str(PROJECT_ROOT / "data" / "eval" / "jsonl_logs")
+    log_dir, log_dir_error = _resolve_log_dir(raw_dir)
+    if log_dir is None:
+        st.session_state.last_conversation_log_error = log_dir_error
+        st.session_state.last_conversation_log_path = ""
+        return
 
-    log_dir = Path(raw_dir).expanduser().resolve()
-    log_dir.mkdir(parents=True, exist_ok=True)
+    requested_dir = Path(raw_dir).expanduser() if raw_dir else DEFAULT_SHARED_LOG_DIR
+    if requested_dir != log_dir:
+        st.session_state.last_conversation_log_error = (
+            f"Configured log directory is not writable; saving logs to `{log_dir}` instead."
+        )
 
     workspace_name = Path(st.session_state.workspace_path).resolve().name
     file_stem = _sanitize_log_stem(workspace_name)
@@ -504,7 +528,8 @@ def _save_conversation_log_if_enabled(agent: GeosAgent) -> None:
         with log_path.open("w", encoding="utf-8") as f:
             json.dump(log_data, f, indent=2, ensure_ascii=False)
         st.session_state.last_conversation_log_path = str(log_path)
-        st.session_state.last_conversation_log_error = ""
+        if requested_dir == log_dir:
+            st.session_state.last_conversation_log_error = ""
     except Exception as e:
         st.session_state.last_conversation_log_error = f"Failed to save log: {e}"
 
