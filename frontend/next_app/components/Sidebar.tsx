@@ -224,20 +224,20 @@ export default function Sidebar({
           onClick={() =>
             setConfig({
               ...config,
-              enableContextProjection: !config.enableContextProjection,
+              enableContextCompaction: !config.enableContextCompaction,
             })
           }
         >
           <input
             type="checkbox"
-            checked={config.enableContextProjection}
+            checked={config.enableContextCompaction}
             onChange={(e) =>
-              setConfig({ ...config, enableContextProjection: e.target.checked })
+              setConfig({ ...config, enableContextCompaction: e.target.checked })
             }
             style={{ cursor: "pointer" }}
           />
           <span style={{ color: "var(--text-secondary)", fontSize: "11.5px" }}>
-            context projection
+            context compaction
           </span>
         </div>
 
