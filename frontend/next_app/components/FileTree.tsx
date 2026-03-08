@@ -1,7 +1,39 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import {
+  Folder,
+  FolderOpen,
+  File,
+  FileText,
+  FileCode,
+  FileImage,
+  Database,
+  Terminal,
+} from "lucide-react";
 import { getFileTree } from "../lib/api";
 import { FileNode } from "../lib/types";
+
+function getFileIcon(name: string, isOpen?: boolean) {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  if (isOpen !== undefined) {
+    return isOpen ? (
+      <FolderOpen size={13} style={{ flexShrink: 0 }} />
+    ) : (
+      <Folder size={13} style={{ flexShrink: 0 }} />
+    );
+  }
+  if (["py", "js", "ts", "tsx", "jsx", "c", "cpp", "h", "java", "rs"].includes(ext))
+    return <FileCode size={12} style={{ flexShrink: 0 }} />;
+  if (["png", "jpg", "jpeg", "gif", "svg", "bmp", "webp"].includes(ext))
+    return <FileImage size={12} style={{ flexShrink: 0 }} />;
+  if (["hdf5", "h5", "db", "sqlite", "vtk"].includes(ext))
+    return <Database size={12} style={{ flexShrink: 0 }} />;
+  if (["sh", "bash", "zsh"].includes(ext))
+    return <Terminal size={12} style={{ flexShrink: 0 }} />;
+  if (["xml", "json", "yaml", "yml", "toml", "csv", "tsv", "txt", "md", "log"].includes(ext))
+    return <FileText size={12} style={{ flexShrink: 0 }} />;
+  return <File size={12} style={{ flexShrink: 0 }} />;
+}
 
 // File extension → color
 function fileColor(name: string): string {
@@ -27,9 +59,10 @@ interface NodeProps {
   node: FileNode;
   depth: number;
   sessionId: string;
+  onOpenFile?: (path: string, name: string) => void;
 }
 
-function TreeNode({ node, depth, sessionId }: NodeProps) {
+function TreeNode({ node, depth, sessionId, onOpenFile }: NodeProps) {
   const [expanded, setExpanded] = useState(depth === 0 || node.name === "inputs" || node.name === "outputs");
 
   const indent = depth * 12;
@@ -64,7 +97,9 @@ function TreeNode({ node, depth, sessionId }: NodeProps) {
           <span style={{ fontSize: 9, width: 10, flexShrink: 0, color: "var(--text-dim)" }}>
             {!hasChildren ? "" : expanded ? "▼" : "▶"}
           </span>
-          <span style={{ fontSize: 11, flexShrink: 0 }}>📁</span>
+          <span style={{ color: "var(--accent)", display: "flex", alignItems: "center" }}>
+            {getFileIcon(node.name, expanded)}
+          </span>
           <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>
             {node.name}
           </span>
@@ -83,6 +118,7 @@ function TreeNode({ node, depth, sessionId }: NodeProps) {
                 node={child}
                 depth={depth + 1}
                 sessionId={sessionId}
+                onOpenFile={onOpenFile}
               />
             ))}
             {node.children.length === 0 && (
@@ -106,10 +142,11 @@ function TreeNode({ node, depth, sessionId }: NodeProps) {
   // File node
   const color = fileColor(node.name);
   return (
-    <a
-      href={`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/file?path=${encodeURIComponent(node.path)}`}
-      target="_blank"
-      rel="noopener noreferrer"
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpenFile?.(node.path, node.name)}
+      onKeyDown={(e) => { if (e.key === "Enter") onOpenFile?.(node.path, node.name); }}
       style={{
         display: "flex",
         alignItems: "center",
@@ -127,14 +164,14 @@ function TreeNode({ node, depth, sessionId }: NodeProps) {
         (e.currentTarget as HTMLElement).style.background = "transparent";
       }}
     >
-      <span style={{ color, fontSize: "11px" }}>─</span>
+      <span style={{ color, display: "flex", alignItems: "center" }}>{getFileIcon(node.name)}</span>
       <span style={{ color, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {node.name}
       </span>
       <span style={{ color: "var(--text-dim)", fontSize: "10px", flexShrink: 0 }}>
         {formatSize(node.size)}
       </span>
-    </a>
+    </div>
   );
 }
 
@@ -142,9 +179,10 @@ interface Props {
   sessionId: string | null;
   refreshKey: number;
   workspacePath: string;
+  onOpenFile?: (path: string, name: string) => void;
 }
 
-export default function FileTree({ sessionId, refreshKey, workspacePath }: Props) {
+export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenFile }: Props) {
   const [tree, setTree] = useState<FileNode | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -295,7 +333,7 @@ export default function FileTree({ sessionId, refreshKey, workspacePath }: Props
             loading...
           </div>
         ) : tree ? (
-          <TreeNode node={tree} depth={0} sessionId={sessionId} />
+          <TreeNode node={tree} depth={0} sessionId={sessionId} onOpenFile={onOpenFile} />
         ) : (
           <div
             style={{

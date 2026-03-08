@@ -4,52 +4,52 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Design tokens ─────────────────────────────────────────────────────── */
+/* ─── Design tokens (light — default) ──────────────────────────────────── */
 :root {
   /* Background layers */
-  --bg-base:     #0c0c0c;
-  --bg-panel:    #111111;
-  --bg-surface:  #171717;
-  --bg-elevated: #1d1d1d;
-  --bg-hover:    #222222;
-  --bg-active:   #292929;
+  --bg-base:     #f5f5f5;
+  --bg-panel:    #ebebeb;
+  --bg-surface:  #ffffff;
+  --bg-elevated: #e2e2e2;
+  --bg-hover:    #d8d8d8;
+  --bg-active:   #d0d0d0;
 
   /* Borders */
-  --border-faint:  #161616;
-  --border-subtle: #1f1f1f;
-  --border-mid:    #282828;
-  --border-strong: #353535;
+  --border-faint:  #e8e8e8;
+  --border-subtle: #dcdcdc;
+  --border-mid:    #c8c8c8;
+  --border-strong: #b0b0b0;
 
   /* Text */
-  --text-primary:   #c0c0c0;
-  --text-secondary: #666666;
-  --text-dim:       #404040;
-  --text-bright:    #e4e4e4;
-  --text-code:      #93c5fd;
+  --text-primary:   #2a2a2a;
+  --text-secondary: #5a5a5a;
+  --text-dim:       #888888;
+  --text-bright:    #111111;
+  --text-code:      #2563eb;
 
   /* MATLAB orange accent */
-  --accent:          #e07810;
-  --accent-bright:   #f7a244;
-  --accent-dim:      rgba(224, 120, 16, 0.25);
-  --accent-bg:       rgba(224, 120, 16, 0.06);
-  --accent-border:   rgba(224, 120, 16, 0.3);
+  --accent:          #d06800;
+  --accent-bright:   #e07810;
+  --accent-dim:      rgba(208, 104, 0, 0.15);
+  --accent-bg:       rgba(208, 104, 0, 0.07);
+  --accent-border:   rgba(208, 104, 0, 0.3);
 
   /* Semantic */
-  --success:     #4d8a5f;
-  --success-bg:  rgba(77, 138, 95, 0.1);
-  --error:       #bf3b30;
-  --error-bg:    rgba(191, 59, 48, 0.1);
-  --warning:     #c47f0a;
-  --warning-bg:  rgba(196, 127, 10, 0.1);
-  --info:        #3a72c4;
-  --info-bg:     rgba(58, 114, 196, 0.1);
+  --success:     #3a7a4c;
+  --success-bg:  rgba(58, 122, 76, 0.1);
+  --error:       #c03030;
+  --error-bg:    rgba(192, 48, 48, 0.08);
+  --warning:     #b07000;
+  --warning-bg:  rgba(176, 112, 0, 0.08);
+  --info:        #2a62b4;
+  --info-bg:     rgba(42, 98, 180, 0.08);
 
   /* Tool blocks */
-  --tool-bg:        rgba(24, 38, 60, 0.4);
-  --tool-border:    #1e3050;
-  --tool-text:      #7db9e8;
-  --thinking-bg:    rgba(18, 18, 18, 0.9);
-  --thinking-border:#202020;
+  --tool-bg:        rgba(42, 98, 180, 0.06);
+  --tool-border:    rgba(42, 98, 180, 0.18);
+  --tool-text:      #2a62b4;
+  --thinking-bg:    rgba(0, 0, 0, 0.03);
+  --thinking-border:#d0d0d0;
 
   /* Layout */
   --sidebar-w:  252px;
@@ -59,6 +59,48 @@
   /* Typography */
   --font-mono: 'JetBrains Mono', 'Courier New', monospace;
   font-size: 12.5px;
+}
+
+/* ─── Dark theme ───────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg-base:     #0c0c0c;
+  --bg-panel:    #111111;
+  --bg-surface:  #171717;
+  --bg-elevated: #1d1d1d;
+  --bg-hover:    #222222;
+  --bg-active:   #292929;
+
+  --border-faint:  #161616;
+  --border-subtle: #1f1f1f;
+  --border-mid:    #282828;
+  --border-strong: #353535;
+
+  --text-primary:   #c0c0c0;
+  --text-secondary: #8a8a8a;
+  --text-dim:       #555555;
+  --text-bright:    #e4e4e4;
+  --text-code:      #93c5fd;
+
+  --accent:          #e07810;
+  --accent-bright:   #f7a244;
+  --accent-dim:      rgba(224, 120, 16, 0.25);
+  --accent-bg:       rgba(224, 120, 16, 0.06);
+  --accent-border:   rgba(224, 120, 16, 0.3);
+
+  --success:     #4d8a5f;
+  --success-bg:  rgba(77, 138, 95, 0.1);
+  --error:       #bf3b30;
+  --error-bg:    rgba(191, 59, 48, 0.1);
+  --warning:     #c47f0a;
+  --warning-bg:  rgba(196, 127, 10, 0.1);
+  --info:        #3a72c4;
+  --info-bg:     rgba(58, 114, 196, 0.1);
+
+  --tool-bg:        rgba(24, 38, 60, 0.4);
+  --tool-border:    #1e3050;
+  --tool-text:      #7db9e8;
+  --thinking-bg:    rgba(18, 18, 18, 0.9);
+  --thinking-border:#2a2a2a;
 }
 
 /* ─── Reset ─────────────────────────────────────────────────────────────── */
@@ -208,4 +250,49 @@ input[type="checkbox"] {
   border: none;
   border-top: 1px solid var(--border-subtle);
   margin: 8px 0;
+}
+
+/* ─── KaTeX ──────────────────────────────────────────────────────────────── */
+.katex { font-size: 1em; }
+
+/* ─── Radix Dialog overlay ───────────────────────────────────────────────── */
+.radix-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+}
+.radix-dialog-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 101;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+/* ─── Radix Select ───────────────────────────────────────────────────────── */
+.radix-select-content {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-mid);
+  border-radius: 3px;
+  padding: 3px;
+  max-height: 280px;
+  overflow-y: auto;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+.radix-select-item {
+  padding: 4px 8px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  border-radius: 2px;
+  cursor: pointer;
+  outline: none;
+}
+.radix-select-item[data-highlighted] {
+  background: var(--accent-bg);
+  color: var(--accent);
 }

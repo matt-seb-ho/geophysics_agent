@@ -1,19 +1,27 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import ChatArea from "../components/ChatArea";
+import ChatHistorySidebar from "../components/ChatHistorySidebar";
 import FileTree from "../components/FileTree";
-import Sidebar from "../components/Sidebar";
+import FileViewer from "../components/FileViewer";
+import SettingsModal from "../components/SettingsModal";
 import {
   checkHealth,
   createSession,
   deleteSession,
+  generateTitle,
+  getModels,
+  getSessions,
   messageUrl,
   updateWorkspace,
 } from "../lib/api";
 import {
+  ChatSession,
   defaultConfig,
   Message,
   MessagePart,
+  ModelInfo,
+  OpenTab,
   PendingInput,
   SessionConfig,
   TokenUsage,
@@ -32,21 +40,39 @@ export default function HomePage() {
   const [showFileTree, setShowFileTree] = useState(false);
   const [fileTreeRefreshKey, setFileTreeRefreshKey] = useState(0);
   const [apiKeyMissing, setApiKeyMissing] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
+  const [activeTab, setActiveTab] = useState<string | null>(null);
+  const [showFileViewer, setShowFileViewer] = useState(false);
+  const [firstMessageSent, setFirstMessageSent] = useState(false);
 
   // Stable ref so async streaming closures see the latest sessionId
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = sessionId;
 
-  // ── Health check ──────────────────────────────────────────────────────────
+  // ── Health check + load models + sessions ──────────────────────────────
   useEffect(() => {
     checkHealth()
       .then(({ api_key_set }) => setApiKeyMissing(!api_key_set))
-      .catch(() => {
-        /* backend offline — errors surface when sending */
-      });
+      .catch(() => {});
+
+    getModels()
+      .then((m) => setModels(m))
+      .catch(() => {});
+
+    getSessions()
+      .then((s) => setSessions(s))
+      .catch(() => {});
   }, []);
 
-  // ── Session helpers ───────────────────────────────────────────────────────
+  // ── Derive context length from current model ─────────────────────────
+  const currentModel = models.find((m) => m.id === config.model);
+  const contextLength = currentModel?.contextLength ?? 0;
+
+  // ── Session helpers ───────────────────────────────────────────────────
   const ensureSession = async (cfg: SessionConfig, wp: string): Promise<string> => {
     const existing = sessionIdRef.current;
     if (existing) return existing;
@@ -64,7 +90,13 @@ export default function HomePage() {
     setPendingInput(null);
     setSessionId(null);
     setWorkspacePath("");
+    setOpenTabs([]);
+    setActiveTab(null);
+    setShowFileViewer(false);
+    setFirstMessageSent(false);
     if (old) deleteSession(old).catch(() => {});
+    // Refresh sessions list
+    getSessions().then((s) => setSessions(s)).catch(() => {});
   };
 
   const handleWorkspaceChange = async (path: string) => {
@@ -75,14 +107,42 @@ export default function HomePage() {
       await updateWorkspace(sid, path);
       setFileTreeRefreshKey((k) => k + 1);
     } catch {
-      /* invalid path — ignore until user commits */
+      /* invalid path */
     }
   };
 
-  // ── Main send / stream ────────────────────────────────────────────────────
+  const handleSelectSession = (id: string) => {
+    // For now just highlight — full reload would need backend message storage
+    if (id === sessionId) return;
+  };
+
+  // ── File tab management ─────────────────────────────────────────────
+  const handleOpenFile = (path: string, name: string) => {
+    if (!openTabs.find((t) => t.path === path)) {
+      setOpenTabs((prev) => [...prev, { path, name }]);
+    }
+    setActiveTab(path);
+    setShowFileViewer(true);
+  };
+
+  const handleCloseTab = (path: string) => {
+    setOpenTabs((prev) => {
+      const next = prev.filter((t) => t.path !== path);
+      if (activeTab === path) {
+        setActiveTab(next.length > 0 ? next[next.length - 1].path : null);
+        if (next.length === 0) setShowFileViewer(false);
+      }
+      return next;
+    });
+  };
+
+  // ── Main send / stream ────────────────────────────────────────────────
   const sendMessage = async (text: string) => {
     if (isStreaming) return;
     setIsStreaming(true);
+
+    const isFirst = !firstMessageSent;
+    setFirstMessageSent(true);
 
     // Clear pending input immediately
     if (pendingInput) setPendingInput(null);
@@ -114,7 +174,18 @@ export default function HomePage() {
     try {
       const sid = await ensureSession(config, workspacePath);
 
-      // ── Local streaming state (mutable, not React state) ──────────────────
+      // Auto-generate title after first message
+      if (isFirst) {
+        generateTitle(sid, text)
+          .then((title) => {
+            setSessions((prev) =>
+              prev.map((s) => (s.id === sid ? { ...s, name: title } : s))
+            );
+          })
+          .catch(() => {});
+      }
+
+      // ── Local streaming state (mutable, not React state) ──────────────
       const parts: MessagePart[] = [];
       let currentText     = "";
       let currentThinking = "";
@@ -136,7 +207,7 @@ export default function HomePage() {
         );
       };
 
-      // ── Fetch SSE stream ───────────────────────────────────────────────────
+      // ── Fetch SSE stream ───────────────────────────────────────────────
       const res = await fetch(messageUrl(sid), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -235,6 +306,8 @@ export default function HomePage() {
               promptTokens:     (event.prompt_tokens     as number) ?? 0,
               completionTokens: (event.completion_tokens as number) ?? 0,
               totalTokens:      (event.total_tokens      as number) ?? 0,
+              contextTokensEst: (event.context_tokens_est as number) ?? undefined,
+              compactionThreshold: (event.compaction_threshold as number) ?? undefined,
             });
           } else if (type === "new_files") {
             setFileTreeRefreshKey((k) => k + 1);
@@ -243,13 +316,16 @@ export default function HomePage() {
         }
       }
 
-      // ── Finalize ───────────────────────────────────────────────────────────
+      // ── Finalize ───────────────────────────────────────────────────────
       flushText();
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId ? { ...m, parts, streaming: false } : m
         )
       );
+
+      // Refresh sessions after message
+      getSessions().then((s) => setSessions(s)).catch(() => {});
     } catch (err) {
       setMessages((prev) =>
         prev.map((m) =>
@@ -267,7 +343,7 @@ export default function HomePage() {
     }
   };
 
-  // ── Layout ────────────────────────────────────────────────────────────────
+  // ── Layout ────────────────────────────────────────────────────────────
   return (
     <div
       style={{
@@ -277,17 +353,19 @@ export default function HomePage() {
         background: "var(--bg-base)",
       }}
     >
-      <Sidebar
-        config={config}
-        setConfig={setConfig}
-        tokenUsage={tokenUsage}
-        isStreaming={isStreaming}
-        sessionId={sessionId}
-        workspacePath={workspacePath}
-        onWorkspaceChange={handleWorkspaceChange}
-        onNewChat={handleNewChat}
-        apiKeyMissing={apiKeyMissing}
-      />
+      {showSidebar && (
+        <ChatHistorySidebar
+          sessions={sessions}
+          activeSessionId={sessionId}
+          onSelectSession={handleSelectSession}
+          onNewChat={handleNewChat}
+          onOpenSettings={() => setShowSettings(true)}
+          tokenUsage={tokenUsage}
+          isStreaming={isStreaming}
+          apiKeyMissing={apiKeyMissing}
+          contextLength={contextLength}
+        />
+      )}
 
       <ChatArea
         messages={messages}
@@ -297,15 +375,38 @@ export default function HomePage() {
         onSend={sendMessage}
         onToggleFileTree={() => setShowFileTree((v) => !v)}
         showFileTree={showFileTree}
+        onToggleSidebar={() => setShowSidebar((v) => !v)}
+        showSidebar={showSidebar}
       />
 
       {showFileTree && (
-        <FileTree
-          sessionId={sessionId}
-          refreshKey={fileTreeRefreshKey}
-          workspacePath={workspacePath}
-        />
+        showFileViewer && openTabs.length > 0 ? (
+          <FileViewer
+            tabs={openTabs}
+            activeTab={activeTab}
+            sessionId={sessionId}
+            onSelectTab={setActiveTab}
+            onCloseTab={handleCloseTab}
+            onBackToTree={() => setShowFileViewer(false)}
+          />
+        ) : (
+          <FileTree
+            sessionId={sessionId}
+            refreshKey={fileTreeRefreshKey}
+            workspacePath={workspacePath}
+            onOpenFile={handleOpenFile}
+          />
+        )
       )}
+
+      <SettingsModal
+        open={showSettings}
+        onOpenChange={setShowSettings}
+        config={config}
+        setConfig={setConfig}
+        workspacePath={workspacePath}
+        onWorkspaceChange={handleWorkspaceChange}
+      />
     </div>
   );
 }

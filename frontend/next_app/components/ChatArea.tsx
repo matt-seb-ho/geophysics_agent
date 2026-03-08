@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { Sun, Moon, PanelLeft } from "lucide-react";
+import { useTheme } from "../lib/ThemeProvider";
 import { Message, PendingInput } from "../lib/types";
 import MessageBubble from "./MessageBubble";
 
@@ -11,6 +13,8 @@ interface Props {
   onSend: (text: string) => void;
   onToggleFileTree: () => void;
   showFileTree: boolean;
+  onToggleSidebar?: () => void;
+  showSidebar?: boolean;
 }
 
 const WELCOME = `GEOS Multiphysics Simulation Agent
@@ -33,7 +37,10 @@ export default function ChatArea({
   onSend,
   onToggleFileTree,
   showFileTree,
+  onToggleSidebar,
+  showSidebar,
 }: Props) {
+  const { theme, toggleTheme } = useTheme();
   const [inputText, setInputText] = useState("");
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -96,10 +103,27 @@ export default function ChatArea({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {onToggleSidebar && (
+            <button
+              onClick={onToggleSidebar}
+              title="Toggle sidebar"
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                color: showSidebar ? "var(--accent)" : "var(--text-dim)",
+                display: "flex",
+                alignItems: "center",
+                padding: 2,
+              }}
+            >
+              <PanelLeft size={14} />
+            </button>
+          )}
           <span
             style={{ color: "var(--text-dim)", fontSize: "10px", letterSpacing: "0.06em" }}
           >
-            GEOS AGENT
+            Chat
           </span>
           {isStreaming && (
             <span
@@ -136,6 +160,25 @@ export default function ChatArea({
           )}
         </div>
 
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            style={{
+              background: "transparent",
+              border: "1px solid var(--border-mid)",
+              color: "var(--text-dim)",
+              padding: "2px 6px",
+              borderRadius: 2,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            {theme === "dark" ? <Sun size={12} /> : <Moon size={12} />}
+          </button>
+
         {/* File tree toggle */}
         <button
           onClick={onToggleFileTree}
@@ -162,6 +205,7 @@ export default function ChatArea({
         >
           {showFileTree ? "✕ files" : "⊞ files"}
         </button>
+        </div>
       </div>
 
       {/* ── Message list ── */}
@@ -345,16 +389,6 @@ export default function ChatArea({
           </button>
         </div>
 
-        <div
-          style={{
-            marginTop: 5,
-            color: "var(--text-dim)",
-            fontSize: "9.5px",
-            letterSpacing: "0.03em",
-          }}
-        >
-          Enter to send · Shift+Enter for newline · Shift+Enter also sends multi-line
-        </div>
       </div>
     </div>
   );

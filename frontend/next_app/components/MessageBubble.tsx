@@ -1,6 +1,8 @@
 "use client";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { Message, MessagePart } from "../lib/types";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolCallBlock from "./ToolCallBlock";
@@ -12,7 +14,7 @@ function formatTime(d: Date): string {
 function TextPart({ content, streaming }: { content: string; streaming?: boolean }) {
   return (
     <div className={`md ${streaming ? "cursor-blink" : ""}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{content}</ReactMarkdown>
     </div>
   );
 }
@@ -91,7 +93,7 @@ function ImagePart({
   caption?: string;
   sessionId?: string;
 }) {
-  const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6305";
   const src = sessionId
     ? `${API_URL}/api/sessions/${sessionId}/file?path=${encodeURIComponent(path)}`
     : path;
@@ -211,9 +213,11 @@ export default function MessageBubble({ message, sessionId, isLast }: Props) {
         >
           {isUser ? "in" : "out"}
         </div>
-        <div style={{ color: "var(--text-dim)", fontSize: "9.5px", marginTop: 2 }}>
-          {time}
-        </div>
+        {(isUser || !message.streaming) && (
+          <div style={{ color: "var(--text-dim)", fontSize: "9.5px", marginTop: 2 }}>
+            {time}
+          </div>
+        )}
       </div>
 
       {/* Separator line */}

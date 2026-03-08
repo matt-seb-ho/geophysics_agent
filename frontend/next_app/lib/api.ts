@@ -1,6 +1,6 @@
-import { FileNode, SessionConfig } from "./types";
+import { ChatSession, FileNode, ModelInfo, SessionConfig } from "./types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6305";
 
 export async function checkHealth(): Promise<{ api_key_set: boolean }> {
   const res = await fetch(`${API_URL}/health`);
@@ -55,4 +55,50 @@ export async function getFileTree(
   const res = await fetch(`${API_URL}/api/sessions/${sessionId}/tree`);
   if (!res.ok) throw new Error(`Failed to get file tree: ${res.status}`);
   return res.json();
+}
+
+export async function getModels(): Promise<ModelInfo[]> {
+  const res = await fetch(`${API_URL}/api/models`);
+  if (!res.ok) throw new Error(`Failed to get models: ${res.status}`);
+  const data = await res.json();
+  return (data.models ?? []).map((m: { id: string; context_length?: number }) => ({
+    id: m.id,
+    contextLength: m.context_length ?? 128000,
+  }));
+}
+
+export async function getSessions(): Promise<ChatSession[]> {
+  const res = await fetch(`${API_URL}/api/chat-sessions`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.sessions ?? [];
+}
+
+export async function generateTitle(
+  sessionId: string,
+  firstMessage: string
+): Promise<string> {
+  const res = await fetch(`${API_URL}/api/sessions/${sessionId}/generate-title`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: firstMessage }),
+  });
+  if (!res.ok) throw new Error(`Failed to generate title: ${res.status}`);
+  const data = await res.json();
+  return data.title;
+}
+
+export async function getFileContent(
+  sessionId: string,
+  path: string
+): Promise<string> {
+  const res = await fetch(
+    `${API_URL}/api/sessions/${sessionId}/file?path=${encodeURIComponent(path)}`
+  );
+  if (!res.ok) throw new Error(`Failed to get file: ${res.status}`);
+  return res.text();
+}
+
+export function fileUrl(sessionId: string, path: string): string {
+  return `${API_URL}/api/sessions/${sessionId}/file?path=${encodeURIComponent(path)}`;
 }

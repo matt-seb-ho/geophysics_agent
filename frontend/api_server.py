@@ -2,7 +2,7 @@
 FastAPI backend for the GEOS Agent — Next.js interface.
 
 Wraps GeosAgent with streaming SSE endpoints.
-Run with: uvicorn frontend.api_server:app --reload --port 8000
+Run with: uvicorn frontend.api_server:app --reload --port 6305
 """
 
 import asyncio
@@ -10,11 +10,14 @@ import json
 import os
 import sys
 import tempfile
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,6 +57,89 @@ app.add_middleware(
 _executor = ThreadPoolExecutor(max_workers=4)
 _sessions: Dict[str, Dict[str, Any]] = {}
 
+# Session persistence
+_SESSIONS_DIR = Path.home() / ".geos-agent"
+_SESSIONS_FILE = _SESSIONS_DIR / "sessions.json"
+
+# Model info cache
+_model_cache: Optional[List[Dict[str, Any]]] = None
+_model_cache_time: float = 0
+
+
+def _load_session_metadata() -> List[Dict[str, Any]]:
+    """Load session metadata from disk."""
+    if _SESSIONS_FILE.exists():
+        try:
+            data = json.loads(_SESSIONS_FILE.read_text())
+            return data.get("sessions", [])
+        except (json.JSONDecodeError, OSError):
+            pass
+    return []
+
+
+def _save_session_metadata(sessions: List[Dict[str, Any]]) -> None:
+    """Write session metadata to disk."""
+    _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    _SESSIONS_FILE.write_text(json.dumps({"sessions": sessions}, indent=2))
+
+
+def _upsert_session_meta(
+    session_id: str,
+    name: str = "",
+    message_count: int = 0,
+    created_at: Optional[str] = None,
+) -> None:
+    """Create or update session metadata on disk."""
+    sessions = _load_session_metadata()
+    now = datetime.now(timezone.utc).isoformat()
+    existing = next((s for s in sessions if s["id"] == session_id), None)
+    if existing:
+        existing["lastMessageAt"] = now
+        existing["messageCount"] = message_count or existing.get("messageCount", 0)
+        if name:
+            existing["name"] = name
+    else:
+        sessions.insert(
+            0,
+            {
+                "id": session_id,
+                "name": name,
+                "createdAt": created_at or now,
+                "lastMessageAt": now,
+                "messageCount": message_count,
+            },
+        )
+    _save_session_metadata(sessions)
+
+
+async def _fetch_openrouter_models() -> List[Dict[str, Any]]:
+    """Fetch model list from OpenRouter with context lengths."""
+    global _model_cache, _model_cache_time
+    # Cache for 1 hour
+    if _model_cache and (time.time() - _model_cache_time < 3600):
+        return _model_cache
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get("https://openrouter.ai/api/v1/models")
+            if resp.status_code == 200:
+                data = resp.json().get("data", [])
+                model_map = {m["id"]: m.get("context_length", 128000) for m in data}
+                result = []
+                for mid in AVAILABLE_MODELS:
+                    result.append(
+                        {"id": mid, "context_length": model_map.get(mid, 128000)}
+                    )
+                _model_cache = result
+                _model_cache_time = time.time()
+                return result
+    except Exception:
+        pass
+
+    # Fallback: return models without real context lengths
+    return [{"id": mid, "context_length": 128000} for mid in AVAILABLE_MODELS]
+
+
 AVAILABLE_MODELS = [
     "moonshotai/kimi-k2.5",
     "z-ai/glm-5",
@@ -90,6 +176,10 @@ class MessageRequest(BaseModel):
 
 class WorkspaceUpdateRequest(BaseModel):
     workspace_path: str
+
+
+class TitleRequest(BaseModel):
+    message: str
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +358,20 @@ async def _stream_agent_response(
         if session.get("agent"):
             usage = session["agent"].client.get_token_usage()
             session["token_usage"] = usage
-            yield f"data: {json.dumps({'type': 'token_usage', **usage})}\n\n"
+
+            # Include context usage info
+            context_info: Dict[str, Any] = {}
+            agent_obj = session["agent"]
+            if hasattr(agent_obj, "_last_compaction_stats") and agent_obj._last_compaction_stats:
+                stats = agent_obj._last_compaction_stats
+                context_info["context_tokens_est"] = stats.get("tokens_before", 0)
+                context_info["compaction_threshold"] = stats.get("threshold", 100000)
+
+            yield f"data: {json.dumps({'type': 'token_usage', **usage, **context_info})}\n\n"
+
+        # Update message count
+        session["message_count"] = session.get("message_count", 0) + 1
+        _upsert_session_meta(session_id, message_count=session["message_count"])
 
         if outputs_dir.is_dir():
             new_files = [
@@ -290,7 +393,8 @@ async def _stream_agent_response(
 
 @app.get("/api/models")
 async def get_models():
-    return {"models": AVAILABLE_MODELS}
+    models = await _fetch_openrouter_models()
+    return {"models": models}
 
 
 @app.post("/api/sessions")
@@ -312,12 +416,15 @@ async def create_session(req: SessionConfig):
         "workspace": str(workspace),
         "agent": None,
         "pending_input": None,
+        "message_count": 0,
         "token_usage": {
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
         },
     }
+
+    _upsert_session_meta(session_id)
 
     return {"session_id": session_id, "workspace_path": str(workspace)}
 
@@ -428,6 +535,57 @@ async def get_token_usage(session_id: str):
     )
 
 
+@app.get("/api/chat-sessions")
+async def list_chat_sessions():
+    """List all persisted chat sessions."""
+    sessions = _load_session_metadata()
+    return {"sessions": sessions}
+
+
+@app.post("/api/sessions/{session_id}/generate-title")
+async def generate_title(session_id: str, req: TitleRequest):
+    """Generate a short title for a chat session from the first message."""
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="API key not set")
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "openai/gpt-5-mini",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "Generate a concise 3-6 word title for this chat based on the user's first message. Reply with ONLY the title, no quotes or punctuation.",
+                        },
+                        {"role": "user", "content": req.message[:500]},
+                    ],
+                    "max_tokens": 20,
+                },
+            )
+            if resp.status_code == 200:
+                title = (
+                    resp.json()
+                    .get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
+                    .strip()
+                )
+                if title:
+                    _upsert_session_meta(session_id, name=title)
+                    return {"title": title}
+
+        raise HTTPException(status_code=500, detail="Failed to generate title")
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/health")
 async def health():
     return {
@@ -437,4 +595,4 @@ async def health():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=6305, reload=False)

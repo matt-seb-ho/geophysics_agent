@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "katex/dist/katex.min.css";
+import ThemeProvider from "../lib/ThemeProvider";
 
 export const metadata: Metadata = {
   title: "GEOS Agent",
@@ -12,8 +14,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("theme");document.documentElement.dataset.theme=t==="dark"?"dark":"light"}catch(e){}})()`,
+          }}
+        />
+      </head>
+      <body>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
     </html>
   );
 }

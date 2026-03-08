@@ -35,6 +35,8 @@ export interface TokenUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  contextTokensEst?: number;
+  compactionThreshold?: number;
 }
 
 export interface FileNode {
@@ -61,11 +63,29 @@ export const AVAILABLE_MODELS: string[] = [
   "google/gemini-3.1-flash-lite-preview",
 ];
 
+export interface ChatSession {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastMessageAt: string;
+  messageCount: number;
+}
+
+export interface ModelInfo {
+  id: string;
+  contextLength: number;
+}
+
+export interface OpenTab {
+  path: string;
+  name: string;
+}
+
 export const defaultConfig: SessionConfig = {
   model: "moonshotai/kimi-k2.5",
   provider: "",
   maxSteps: 100,
   enableContextCompaction: true,
-  enableLogging: false,
+  enableLogging: true,
   logDir: "data/eval/jsonl_logs",
 };

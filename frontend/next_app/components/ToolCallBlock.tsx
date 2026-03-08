@@ -55,7 +55,7 @@ export default function ToolCallBlock({
 }: Props) {
   const [resultOpen, setResultOpen] = useState(false);
 
-  const tag   = TOOL_TAGS[name]  ?? name.slice(0, 4).padEnd(4, " ");
+  const tag   = TOOL_TAGS[name]  ?? name;
   const color = TOOL_COLORS[name] ?? "var(--tool-text)";
   const hasOutput = result !== undefined || error !== undefined;
 
@@ -96,10 +96,12 @@ export default function ToolCallBlock({
           {tag}
         </span>
 
-        {/* Function name */}
-        <span style={{ color, fontSize: "12px", fontWeight: 500, flexShrink: 0 }}>
-          {name}
-        </span>
+        {/* Function name — only show separately if name has a known tag */}
+        {TOOL_TAGS[name] !== undefined && (
+          <span style={{ color, fontSize: "12px", fontWeight: 500, flexShrink: 0 }}>
+            {name}
+          </span>
+        )}
 
         {/* Summary */}
         <span
