@@ -26,8 +26,6 @@ DEFAULT_PROTECTED_TOOLS = {
     "prune",
     "distill",
     "compress",
-    "write_file",
-    "edit_file",
 }
 
 
