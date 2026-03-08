@@ -81,7 +81,7 @@ class SessionConfig(BaseModel):
     workspace_path: Optional[str] = None
     enable_logging: bool = False
     log_dir: Optional[str] = None
-    enable_context_projection: bool = True
+    enable_context_compaction: bool = True
 
 
 class MessageRequest(BaseModel):
@@ -106,7 +106,7 @@ def _create_agent(session: Dict[str, Any], stream_callback) -> GeosAgent:
         provider=cfg.provider or None,
         max_steps=cfg.max_steps,
         mode="interactive",
-        enable_context_projection=cfg.enable_context_projection,
+        enable_context_compaction=cfg.enable_context_compaction,
     )
 
     tools = build_default_tools(workspace_root)
