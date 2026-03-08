@@ -145,7 +145,7 @@ if "sidebar_prompt_cache_ttl" not in st.session_state:
     st.session_state.sidebar_prompt_cache_ttl = "default"
 
 if "sidebar_auto_compact_after_tokens" not in st.session_state:
-    st.session_state.sidebar_auto_compact_after_tokens = 20000
+    st.session_state.sidebar_auto_compact_after_tokens = 100000
 
 if "agent_max_steps" not in st.session_state:
     st.session_state.agent_max_steps = 100
@@ -249,7 +249,7 @@ def _get_current_agent_settings() -> tuple[dict, str | None]:
             else st.session_state.get("sidebar_prompt_cache_ttl", "default")
         ),
         "auto_compact_after_tokens": int(
-            st.session_state.get("sidebar_auto_compact_after_tokens", 20000)
+            st.session_state.get("sidebar_auto_compact_after_tokens", 100000)
         ),
         "openrouter_extra_body": extra_body,
     }
