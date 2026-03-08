@@ -63,12 +63,14 @@ INTERACTION MODE: Interactive — Human-in-the-Loop
 
   GENERAL RULES:
   • Prefer multiple short interactions over one long autonomous run.
+  • Within each interaction, batch independent tool calls into the same assistant turn when possible.
   • Never write more than one batch of files without checking back with the user.
   • It is better to ask one too many questions than to produce unwanted output."""
 
 MODE_AUTO = """
 
 INTERACTION MODE: Autonomous
+  • Batch independent tool calls into the same assistant turn whenever possible
   • Do NOT ask user questions via tools—make decisions autonomously
   • If info is missing, make reasonable assumptions and clearly state them
   • If assumptions would be risky, provide a short list of what's needed but proceed anyway"""

@@ -65,6 +65,15 @@ WORKFLOW — AVAILABLE STEPS (not necessarily all in one go):
 In INTERACTIVE mode, only proceed to the next step when the user asks for it.
 In AUTO mode, execute the full pipeline end-to-end.
 
+TOOL CALL EFFICIENCY:
+  • When multiple tool calls are independent, batch them into a single assistant turn.
+  • Prefer grouped retrieval (for example multiple `read_file`, `list_dir`, or search calls together)
+    before asking the model to reason again.
+  • Prefer grouped file creation/editing when the files can be prepared from the same plan.
+  • Do NOT batch tool calls when a later call depends on the result of an earlier one, or when an
+    approval/clarification step must happen first.
+  • Avoid one-tool-at-a-time patterns unless dependency ordering requires it.
+
 
 CRITICAL FILE LOCATION RULES:
   • ALL files that you write (including XML files) → `inputs/` directory
