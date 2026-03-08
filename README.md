@@ -88,6 +88,15 @@ config = AgentConfig(
 )
 ```
 
+**Prompt Caching**:
+
+The agent now supports actual OpenRouter prompt caching instead of the old middle-out transform toggle.
+
+- implicit-cache providers such as OpenAI, Moonshot, Grok, Groq, and DeepSeek need no special request transform.
+- Anthropic uses top-level `cache_control` automatically when enabled.
+- Gemini and Anthropic-compatible explicit breakpoint flows receive text-block cache hints when applicable.
+- the Streamlit UI shows `Cache Read` and `Cache Write` token counts from `prompt_tokens_details`.
+
 **GEOS Primer Context** (recommended):
 
 By default, the agent loads `GEOS_PRIMER.md` into its context at startup (`include_primer=True`). This primer provides:
@@ -103,6 +112,30 @@ config = AgentConfig(
     include_primer=False  # Disable primer to reduce context size
 )
 ```
+
+**Dynamic Context Pruning**:
+
+The agent now includes the same core dynamic context-pruning features as the vendored `opencode-dynamic-context-pruning/` reference:
+
+- `prune`, `distill`, and `compress` are exposed as model-callable tools.
+- automatic deduplication removes older repeated tool calls.
+- superseded `write_file` / `edit_file` calls are dropped after a later `read_file`.
+- errored tool inputs are purged after they age past a turn threshold.
+- visible context includes `<prunable-tools>` IDs and `mNNNN` / `bN` compression boundaries.
+
+CLI controls:
+
+```bash
+uv run geos-agent \
+  --instruction "Your instruction" \
+  --context-limit 120000 \
+  --context-pruning-manual
+```
+
+- `--disable-context-pruning`: turn the feature off entirely
+- `--context-pruning-manual`: disable autonomous pruning/tool use unless the user explicitly asks
+- `--context-limit`: token threshold for stronger pruning/compression nudges
+- `--disable-compress-tool`: keep prune/distill but remove compress
 
 ## Project Structure
 

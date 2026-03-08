@@ -16,6 +16,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from geos_agent.agent_config import AgentConfig
+from geos_agent.context_pruning import strip_message_refs
 from geos_agent.geos_agent import AgentTerminationException, GeosAgent
 from geos_agent.tools.user_io import UserInputRequired
 from geos_agent.tools.utils import build_default_tools
@@ -137,6 +138,15 @@ if "sidebar_max_tokens" not in st.session_state:
 if "sidebar_openrouter_extra_body" not in st.session_state:
     st.session_state.sidebar_openrouter_extra_body = ""
 
+if "sidebar_prompt_caching" not in st.session_state:
+    st.session_state.sidebar_prompt_caching = True
+
+if "sidebar_prompt_cache_ttl" not in st.session_state:
+    st.session_state.sidebar_prompt_cache_ttl = "default"
+
+if "sidebar_auto_compact_after_tokens" not in st.session_state:
+    st.session_state.sidebar_auto_compact_after_tokens = 200000
+
 if "agent_max_steps" not in st.session_state:
     st.session_state.agent_max_steps = 100
 
@@ -157,6 +167,8 @@ if "token_usage" not in st.session_state:
         "prompt_tokens": 0,
         "completion_tokens": 0,
         "total_tokens": 0,
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
     }
 
 # Default workspace: a fresh temp directory that persists for the session
@@ -230,6 +242,15 @@ def _get_current_agent_settings() -> tuple[dict, str | None]:
         "seed": seed,
         "max_tokens": int(st.session_state.get("sidebar_max_tokens", 50000)),
         "max_steps": int(st.session_state.get("sidebar_max_steps", 100)),
+        "prompt_caching": bool(st.session_state.get("sidebar_prompt_caching", True)),
+        "prompt_cache_ttl": (
+            None
+            if st.session_state.get("sidebar_prompt_cache_ttl", "default") == "default"
+            else st.session_state.get("sidebar_prompt_cache_ttl", "default")
+        ),
+        "auto_compact_after_tokens": int(
+            st.session_state.get("sidebar_auto_compact_after_tokens", 200000)
+        ),
         "openrouter_extra_body": extra_body,
     }
     return settings, None
@@ -273,6 +294,34 @@ with st.sidebar:
             "Enable reasoning",
             key="sidebar_reasoning",
             help="Request reasoning tokens for models/providers that support them.",
+        )
+        st.checkbox(
+            "Enable prompt caching",
+            key="sidebar_prompt_caching",
+            help=(
+                "Use provider prompt caching where available. OpenAI, Moonshot, "
+                "Grok, Groq, and DeepSeek cache implicitly; Anthropic and Gemini "
+                "receive explicit cache hints from this client."
+            ),
+        )
+        st.selectbox(
+            "Prompt cache TTL",
+            options=("default", "1h"),
+            key="sidebar_prompt_cache_ttl",
+            help="Anthropic cache TTL override. Most non-Anthropic providers ignore this.",
+        )
+        st.number_input(
+            "Auto-compact after tokens",
+            min_value=0,
+            max_value=2_000_000,
+            value=st.session_state.sidebar_auto_compact_after_tokens,
+            step=10000,
+            key="sidebar_auto_compact_after_tokens",
+            help=(
+                "Estimated prompt-history token threshold for local context "
+                "projection and stronger dynamic-pruning/compression nudges. "
+                "Set to 0 to disable the threshold."
+            ),
         )
         st.slider(
             "Temperature",
@@ -401,6 +450,8 @@ with st.sidebar:
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
+            "cached_tokens": 0,
+            "cache_write_tokens": 0,
         }
         st.rerun()
 
@@ -411,12 +462,16 @@ with st.sidebar:
             "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
             "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
             "total_tokens": int(usage.get("total_tokens", 0) or 0),
+            "cached_tokens": int(usage.get("cached_tokens", 0) or 0),
+            "cache_write_tokens": int(usage.get("cache_write_tokens", 0) or 0),
         }
     elif not st.session_state.messages:
         st.session_state.token_usage = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
+            "cached_tokens": 0,
+            "cache_write_tokens": 0,
         }
 
     st.divider()
@@ -428,6 +483,9 @@ with st.sidebar:
     _tok_in_ph.metric("Input", f"{_usage['prompt_tokens']:,}")
     _tok_out_ph.metric("Output", f"{_usage['completion_tokens']:,}")
     _tok_total_ph.metric("Total", f"{_usage['total_tokens']:,}")
+    _cache_c1, _cache_c2 = st.columns(2)
+    _cache_c1.metric("Cache Read", f"{_usage['cached_tokens']:,}")
+    _cache_c2.metric("Cache Write", f"{_usage['cache_write_tokens']:,}")
 
 # ---------------------------------------------------------------------------
 # Agent factory
@@ -452,9 +510,13 @@ def _create_agent() -> GeosAgent:
         max_tokens=settings["max_tokens"],
         max_steps=settings["max_steps"],
         reasoning=settings["reasoning"],
+        openrouter_prompt_caching=settings["prompt_caching"],
+        openrouter_prompt_cache_ttl=settings["prompt_cache_ttl"],
+        context_projection_trigger_tokens=settings["auto_compact_after_tokens"],
         openrouter_extra_body=settings["openrouter_extra_body"],
         mode="interactive",
     )
+    config.context_pruning.tools.settings.context_limit = settings["auto_compact_after_tokens"]
     agent = GeosAgent(
         workspace_root=workspace_root,
         tools=tools,
@@ -544,10 +606,10 @@ def _render_parts(parts: list) -> None:
     for part in parts:
         ptype = part["type"]
         if ptype == "text":
-            st.markdown(part["content"])
+            st.markdown(strip_message_refs(part["content"]))
         elif ptype == "thinking":
             with st.expander("\U0001f4ad Reasoning", expanded=False):
-                st.markdown(part["content"])
+                st.markdown(strip_message_refs(part["content"]))
         elif ptype == "tool_call":
             icon = TOOL_ICONS.get(part["name"], "\u2699\ufe0f")
             st.markdown(f"{icon} **{part['name']}** \u2014 _{part['summary']}_")
@@ -560,7 +622,7 @@ def _render_parts(parts: list) -> None:
         elif ptype == "error":
             st.warning(part["content"])
         elif ptype == "question":
-            st.info(f"\u2753 **Agent asked:** {part['content']}")
+            st.info(f"\u2753 **Agent asked:** {strip_message_refs(part['content'])}")
             choices = part.get("choices")
             if choices:
                 st.markdown("Choices: " + ", ".join(f"`{c}`" for c in choices))
@@ -615,7 +677,7 @@ for msg in st.session_state.messages:
         if msg.get("parts"):
             _render_parts(msg["parts"])
         elif msg.get("content"):
-            st.markdown(msg["content"])
+            st.markdown(strip_message_refs(msg["content"]))
 
 # ---------------------------------------------------------------------------
 # Pending-question indicator
@@ -682,8 +744,12 @@ if prompt := st.chat_input(_chat_placeholder):
         def _finalize_text() -> None:
             """Freeze the current text block and reset for the next one."""
             if _text_ph[0] is not None and _current_text[0]:
-                _text_ph[0].markdown(_current_text[0])
-                _parts.append({"type": "text", "content": _current_text[0]})
+                cleaned = strip_message_refs(_current_text[0])
+                if cleaned:
+                    _text_ph[0].markdown(cleaned)
+                    _parts.append({"type": "text", "content": cleaned})
+                else:
+                    _text_ph[0].empty()
             _current_text[0] = ""
             _text_ph[0] = None
 
@@ -692,7 +758,8 @@ if prompt := st.chat_input(_chat_placeholder):
                 if _text_ph[0] is None:
                     _text_ph[0] = container.empty()
                 _current_text[0] += data
-                _text_ph[0].markdown(_current_text[0] + "\u258c")
+                cleaned = strip_message_refs(_current_text[0])
+                _text_ph[0].markdown((cleaned + "\u258c") if cleaned else "")
 
             elif event_type == "thinking_start":
                 _finalize_text()
@@ -833,6 +900,8 @@ if prompt := st.chat_input(_chat_placeholder):
         "prompt_tokens": int(_live_usage.get("prompt_tokens", 0) or 0),
         "completion_tokens": int(_live_usage.get("completion_tokens", 0) or 0),
         "total_tokens": int(_live_usage.get("total_tokens", 0) or 0),
+        "cached_tokens": int(_live_usage.get("cached_tokens", 0) or 0),
+        "cache_write_tokens": int(_live_usage.get("cache_write_tokens", 0) or 0),
     }
     _tok_in_ph.metric("Input", f"{st.session_state.token_usage['prompt_tokens']:,}")
     _tok_out_ph.metric("Output", f"{st.session_state.token_usage['completion_tokens']:,}")

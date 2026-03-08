@@ -114,6 +114,39 @@ def main():
         default=None,
         help="Model to use for cheatsheet curation (default: same as --model).",
     )
+    parser.add_argument(
+        "--disable-context-pruning",
+        action="store_true",
+        help="Disable dynamic context pruning tools and automatic pruning strategies.",
+    )
+    parser.add_argument(
+        "--context-pruning-manual",
+        action="store_true",
+        help="Enable manual context-pruning mode so the model only cleans context when explicitly asked.",
+    )
+    parser.add_argument(
+        "--context-limit",
+        type=int,
+        default=100000,
+        help="Estimated token threshold that triggers stronger context-pruning nudges.",
+    )
+    parser.add_argument(
+        "--disable-compress-tool",
+        action="store_true",
+        help="Disable the compress tool while keeping prune/distill available.",
+    )
+    parser.add_argument(
+        "--disable-prompt-caching",
+        action="store_true",
+        help="Disable OpenRouter/provider prompt caching support.",
+    )
+    parser.add_argument(
+        "--prompt-cache-ttl",
+        type=str,
+        choices=("default", "1h"),
+        default="default",
+        help="Anthropic prompt cache TTL. Other providers ignore this setting.",
+    )
 
     args = parser.parse_args()
     workspace_root = Path(args.workspace).resolve()
@@ -129,6 +162,13 @@ def main():
         curate_cheatsheet=not args.no_cheatsheet and not args.no_curate,
         curator_model=args.curator_model,
     )
+    config.context_pruning.enabled = not args.disable_context_pruning
+    config.context_pruning.manual_mode.enabled = args.context_pruning_manual
+    config.context_pruning.tools.settings.context_limit = max(0, args.context_limit)
+    config.openrouter_prompt_caching = not args.disable_prompt_caching
+    config.openrouter_prompt_cache_ttl = None if args.prompt_cache_ttl == "default" else args.prompt_cache_ttl
+    if args.disable_compress_tool:
+        config.context_pruning.tools.compress.permission = "deny"
     agent = GeosAgent(
         workspace_root=workspace_root,
         tools=tools,

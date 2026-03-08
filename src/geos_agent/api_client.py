@@ -9,6 +9,7 @@ This module provides a wrapper around the OpenAI client that adds:
 
 import sys
 import time
+from copy import deepcopy
 from typing import Any, Callable, Optional, TypeVar
 
 from openai import (
@@ -78,7 +79,13 @@ class OpenRouterClient:
         self.log_callback = log_callback
         self.stream_callback = stream_callback
         # Track cumulative token usage
-        self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        self.usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cached_tokens": 0,
+            "cache_write_tokens": 0,
+        }
 
     def get_token_usage(self) -> dict:
         """Return the cumulative token usage for this client instance."""
@@ -266,6 +273,8 @@ class OpenRouterClient:
         tool_choice: str = "auto",
         provider: Optional[str] = None,
         openrouter_extra_body: Optional[dict[str, Any]] = None,
+        openrouter_prompt_caching: bool = True,
+        openrouter_prompt_cache_ttl: Optional[str] = None,
     ) -> tuple[str, list, dict]:
         """
         Make a streaming chat completion call and parse the response.
@@ -289,6 +298,8 @@ class OpenRouterClient:
             max_tokens: Maximum tokens to generate
             reasoning: Enable reasoning for supported models
             tool_choice: Tool choice strategy ("auto", "none", or specific tool)
+            openrouter_prompt_caching: Enable provider prompt-caching support.
+            openrouter_prompt_cache_ttl: Anthropic cache TTL override (e.g. "1h")
 
         Returns:
             Tuple of (full_text_content, tool_calls_list, usage_dict)
@@ -299,14 +310,25 @@ class OpenRouterClient:
         def _make_streaming_call():
             # Build extra body for reasoning models and provider routing
             extra_body = dict(openrouter_extra_body or {})
+
             if reasoning:
                 extra_body["reasoning"] = {"enabled": True}
             if provider:
                 extra_body["provider"] = {"order": [provider]}
 
+            request_messages, cache_control = self._prepare_messages_for_prompt_caching(
+                messages=messages,
+                model=model,
+                provider=provider,
+                enabled=openrouter_prompt_caching,
+                ttl=openrouter_prompt_cache_ttl,
+            )
+            if cache_control:
+                extra_body["cache_control"] = cache_control
+
             stream = self.client.chat.completions.create(
                 model=model,
-                messages=messages,
+                messages=request_messages,
                 tools=tools or [],
                 temperature=temperature,
                 top_p=top_p,
@@ -323,7 +345,13 @@ class OpenRouterClient:
             # Accumulate the response
             full_content = ""
             tool_calls_data: dict[int, dict[str, Any]] = {}  # index -> {id, name, arguments}
-            usage_data = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            usage_data = {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cached_tokens": 0,
+                "cache_write_tokens": 0,
+            }
             
             reasoning_active = False
 
@@ -331,15 +359,24 @@ class OpenRouterClient:
                 for chunk in stream:
                     # Capture usage if present (usually in the last chunk)
                     if chunk.usage:
+                        prompt_details = getattr(chunk.usage, "prompt_tokens_details", None)
+                        cached_tokens = int(getattr(prompt_details, "cached_tokens", 0) or 0)
+                        cache_write_tokens = int(
+                            getattr(prompt_details, "cache_write_tokens", 0) or 0
+                        )
                         # Accumulate to client instance state
                         self.usage["prompt_tokens"] += chunk.usage.prompt_tokens
                         self.usage["completion_tokens"] += chunk.usage.completion_tokens
                         self.usage["total_tokens"] += chunk.usage.total_tokens
+                        self.usage["cached_tokens"] += cached_tokens
+                        self.usage["cache_write_tokens"] += cache_write_tokens
                         
                         # Also track for this specific call
                         usage_data["prompt_tokens"] = chunk.usage.prompt_tokens
                         usage_data["completion_tokens"] = chunk.usage.completion_tokens
                         usage_data["total_tokens"] = chunk.usage.total_tokens
+                        usage_data["cached_tokens"] = cached_tokens
+                        usage_data["cache_write_tokens"] = cache_write_tokens
 
                     if not chunk.choices:
                         continue
@@ -445,3 +482,95 @@ class OpenRouterClient:
 
         # Wrap in retry logic
         return self.with_retry(_make_streaming_call, "streaming chat completion")
+
+    @staticmethod
+    def _build_cache_control(ttl: Optional[str]) -> dict[str, str]:
+        cache_control: dict[str, str] = {"type": "ephemeral"}
+        if ttl == "1h":
+            cache_control["ttl"] = "1h"
+        return cache_control
+
+    @staticmethod
+    def _normalize_provider_name(provider: Optional[str]) -> Optional[str]:
+        if provider is None:
+            return None
+        normalized = provider.strip().lower()
+        return normalized or None
+
+    @classmethod
+    def _resolve_prompt_cache_strategy(
+        cls,
+        model: str,
+        provider: Optional[str],
+    ) -> str:
+        """
+        Decide how prompt caching should be expressed for this model/provider pair.
+
+        Returns one of:
+        - "top_level": send cache_control in extra_body
+        - "explicit": add cache_control to message content blocks
+        - "implicit": do not modify the request for caching
+        """
+        model_lower = model.lower()
+        model_prefix = (model.split("/", 1)[0] if "/" in model else "").lower()
+        normalized_provider = cls._normalize_provider_name(provider)
+
+        if model_prefix == "anthropic":
+            # OpenRouter's top-level automatic caching is the Anthropic-direct path.
+            # If the caller pins Bedrock/Vertex (or another non-Anthropic provider),
+            # fall back to explicit block-level breakpoints instead.
+            if normalized_provider in {None, "anthropic"}:
+                return "top_level"
+            return "explicit"
+
+        if model_prefix == "google" and "gemini" in model_lower:
+            return "explicit"
+
+        return "implicit"
+
+    @classmethod
+    def _prepare_messages_for_prompt_caching(
+        cls,
+        messages: list,
+        model: str,
+        provider: Optional[str],
+        enabled: bool,
+        ttl: Optional[str],
+    ) -> tuple[list, Optional[dict[str, str]]]:
+        if not enabled:
+            return messages, None
+
+        strategy = cls._resolve_prompt_cache_strategy(model, provider)
+        cache_control = cls._build_cache_control(ttl)
+
+        if strategy == "top_level":
+            return messages, cache_control
+
+        if strategy == "explicit":
+            transformed = deepcopy(messages)
+            for msg in transformed:
+                if msg.get("role") not in {"system", "developer", "user"}:
+                    continue
+                content = msg.get("content")
+                if isinstance(content, str) and content.strip():
+                    msg["content"] = [
+                        {
+                            "type": "text",
+                            "text": content,
+                            "cache_control": cache_control,
+                        }
+                    ]
+                    return transformed, None
+                if isinstance(content, list):
+                    for block in reversed(content):
+                        if (
+                            isinstance(block, dict)
+                            and block.get("type") == "text"
+                            and isinstance(block.get("text"), str)
+                            and block.get("text", "").strip()
+                        ):
+                            block["cache_control"] = cache_control
+                            return transformed, None
+            return transformed, None
+
+        return messages, None

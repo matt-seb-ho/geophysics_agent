@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from geos_agent.agent_config import AgentConfig
 from geos_agent.api_client import OpenRouterClient, RetryConfig
 from geos_agent.constants import SYSTEM_PROMPT_PATH
+from geos_agent.context_pruning import ContextPruningManager, strip_message_refs
 from geos_agent.tools.base import Tool
 from geos_agent.tools.user_io import UserInputRequired
 
@@ -207,6 +208,8 @@ class GeosAgent:
                 )
 
         # Format the final system prompt
+        self._context_pruning = ContextPruningManager(self.config)
+        context_pruning_prompt = self._context_pruning.render_system_prompt()
         self.system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
             workspace_root=self.workspace_root,
             mode_specific=mode_specific,
@@ -215,9 +218,10 @@ class GeosAgent:
             geos_source_dir=GEOS_SOURCE_DIR,
             geosdata_source_dir=GEOSDATA_SOURCE_DIR,
         )
+        if context_pruning_prompt:
+            self.system_prompt = f"{self.system_prompt}\n{context_pruning_prompt}"
 
         self.messages: List[Dict[str, Any]] = []
-        # self.tools = tools
         if self.config.mode == "interactive":
             self.tools = tools
         else:
@@ -225,6 +229,7 @@ class GeosAgent:
             self.tools = [
                 t for t in tools if t.name not in {"ask_user", "confirm_action"}
             ]
+        self.tools.extend(self._context_pruning.build_tools())
 
         self.tool_map = {t.name: t for t in self.tools}
 
@@ -242,6 +247,14 @@ class GeosAgent:
             "original_chars": 0,
             "projected_chars": 0,
             "messages_projected": 0,
+        }
+        self._last_pruning_stats: Dict[str, Any] = {
+            "enabled": bool(self.config.context_pruning.enabled),
+            "active": False,
+            "pruned_tool_count": 0,
+            "distilled_tool_count": 0,
+            "compressed_block_count": 0,
+            "saved_tokens_est": 0,
         }
 
     # ------------- logging -------------
@@ -320,12 +333,21 @@ class GeosAgent:
             "summary": summary,
             "usage": self.client.get_token_usage(),
             "context_projection": self._last_projection_stats,
+            "context_pruning": self._last_pruning_stats,
         }
 
     # ------------- tool plumbing -------------
 
     def _get_tool_specs(self) -> List[Dict[str, Any]]:
         return [t.get_spec() for t in self.tools]
+
+    @staticmethod
+    def _safe_load_tool_arguments(arguments: str) -> Dict[str, Any]:
+        try:
+            parsed = json.loads(arguments or "{}")
+        except Exception:
+            return {"_raw_arguments": arguments}
+        return parsed if isinstance(parsed, dict) else {"_parsed_arguments": parsed}
 
     @staticmethod
     def _truncate_text(text: str, max_chars: int) -> str:
@@ -346,6 +368,11 @@ class GeosAgent:
                 fn = tc.get("function", {}) or {}
                 total += len(fn.get("arguments", "") or "")
         return total
+
+    def _estimate_message_payload_tokens(self, messages: List[Dict[str, Any]]) -> int:
+        """Estimate token count from payload size using a simple chars-per-token heuristic."""
+        chars = self._estimate_message_payload_chars(messages)
+        return max(0, (chars + 3) // 4)
 
     def _compact_data_for_context(self, value: Any, depth: int = 0) -> Any:
         """Recursively compact large tool payloads for model context."""
@@ -552,41 +579,56 @@ class GeosAgent:
 
     def _build_model_messages(self) -> List[Dict[str, Any]]:
         """Build projected messages for the model while keeping raw history for logging."""
+        context_messages = self._context_pruning.build_model_messages(self.messages)
+        self._last_pruning_stats = dict(self._context_pruning.last_stats)
+
         if not self.config.enable_context_projection:
             self._last_projection_stats = {
                 "enabled": False,
                 "active": False,
-                "original_chars": self._estimate_message_payload_chars(self.messages),
-                "projected_chars": self._estimate_message_payload_chars(self.messages),
+                "original_chars": self._estimate_message_payload_chars(context_messages),
+                "projected_chars": self._estimate_message_payload_chars(context_messages),
+                "original_tokens_est": self._estimate_message_payload_tokens(context_messages),
+                "projected_tokens_est": self._estimate_message_payload_tokens(context_messages),
                 "messages_projected": 0,
             }
-            return self.messages
+            return context_messages
 
-        original_chars = self._estimate_message_payload_chars(self.messages)
-        trigger = max(0, self.config.context_projection_trigger_chars)
-        if original_chars < trigger:
+        original_chars = self._estimate_message_payload_chars(context_messages)
+        original_tokens = self._estimate_message_payload_tokens(context_messages)
+        token_trigger = max(0, self.config.context_projection_trigger_tokens)
+        char_trigger = max(0, self.config.context_projection_trigger_chars)
+        should_project = False
+        if token_trigger > 0 and original_tokens >= token_trigger:
+            should_project = True
+        elif char_trigger > 0 and original_chars >= char_trigger:
+            should_project = True
+
+        if not should_project:
             self._last_projection_stats = {
                 "enabled": True,
                 "active": False,
                 "original_chars": original_chars,
                 "projected_chars": original_chars,
+                "original_tokens_est": original_tokens,
+                "projected_tokens_est": original_tokens,
                 "messages_projected": 0,
             }
-            return self.messages
+            return context_messages
 
         keep_recent = max(0, self.config.context_projection_keep_recent_messages)
-        cutoff = max(1, len(self.messages) - keep_recent)
+        cutoff = max(1, len(context_messages) - keep_recent)
         tool_name_by_call_id: Dict[str, str] = {}
         projected: List[Dict[str, Any]] = []
         projected_count = 0
         recent_compact_window = 2
 
-        system_message = self.messages[0]
-        older_messages = self.messages[1:cutoff]
-        recent_messages = self.messages[cutoff:]
+        system_message = context_messages[0]
+        older_messages = context_messages[1:cutoff]
+        recent_messages = context_messages[cutoff:]
 
         # Pre-register tool names for consistent tool-result labeling.
-        for msg in self.messages:
+        for msg in context_messages:
             if msg.get("role") == "assistant":
                 for tc in msg.get("tool_calls", []):
                     fn = tc.get("function", {}) or {}
@@ -611,11 +653,14 @@ class GeosAgent:
                 projected.append(msg)
 
         projected_chars = self._estimate_message_payload_chars(projected)
+        projected_tokens = self._estimate_message_payload_tokens(projected)
         self._last_projection_stats = {
             "enabled": True,
             "active": True,
             "original_chars": original_chars,
             "projected_chars": projected_chars,
+            "original_tokens_est": original_tokens,
+            "projected_tokens_est": projected_tokens,
             "messages_projected": projected_count,
             "keep_recent_messages": keep_recent,
             "summary_chars": len(summary_text),
@@ -641,6 +686,8 @@ class GeosAgent:
             tool_choice="auto",
             provider=self.config.provider or None,
             openrouter_extra_body=self.config.openrouter_extra_body,
+            openrouter_prompt_caching=self.config.openrouter_prompt_caching,
+            openrouter_prompt_cache_ttl=self.config.openrouter_prompt_cache_ttl,
         )
 
 
@@ -724,6 +771,7 @@ class GeosAgent:
 
     def start_session(self) -> None:
         """Start/clear a session, keeping the system prompt."""
+        self._context_pruning.reset()
         self.messages = [{"role": "system", "content": self.system_prompt}]
 
     def step(self, user_input: str) -> str:
@@ -739,6 +787,7 @@ class GeosAgent:
             self.start_session()
 
         self._log("user_input", content=user_input)
+        self._context_pruning.begin_user_turn()
         self.messages.append({"role": "user", "content": user_input})
 
         return self._continue_step_loop(start_step=1, total_tool_calls=0)
@@ -787,6 +836,14 @@ class GeosAgent:
             "tool_call_id": tool_call.id,
             "content": result,
         })
+        self._context_pruning.record_tool_result(
+            call_id=tool_call.id,
+            tool_name=exc.tool_name,
+            arguments=self._safe_load_tool_arguments(tool_call.function.arguments or "{}"),
+            assistant_message_index=len(self.messages) - 2,
+            tool_message_index=len(self.messages) - 1,
+            result_content=result,
+        )
 
         total_tool_calls = state["total_tool_calls"] + 1
 
@@ -794,6 +851,14 @@ class GeosAgent:
         for tc in remaining_tcs:
             tool_message = self._run_tool_call(tc)
             self.messages.append(tool_message)
+            self._context_pruning.record_tool_result(
+                call_id=tc.id,
+                tool_name=tc.function.name,
+                arguments=self._safe_load_tool_arguments(tc.function.arguments or "{}"),
+                assistant_message_index=len(self.messages) - 2,
+                tool_message_index=len(self.messages) - 1,
+                result_content=tool_message.get("content", "") or "",
+            )
             total_tool_calls += 1
 
         return self._continue_step_loop(
@@ -814,6 +879,7 @@ class GeosAgent:
             self._log("step_start", step=step_idx)
 
             assistant_text, tool_calls, _ = self._call_model_streaming()
+            assistant_text = strip_message_refs(assistant_text)
             last_assistant_text = assistant_text
 
             assistant_message: Dict[str, Any] = {
@@ -878,6 +944,14 @@ class GeosAgent:
                     }
                     raise
                 self.messages.append(tool_message)
+                self._context_pruning.record_tool_result(
+                    call_id=tc.id,
+                    tool_name=tc.function.name,
+                    arguments=self._safe_load_tool_arguments(tc.function.arguments or "{}"),
+                    assistant_message_index=len(self.messages) - 2,
+                    tool_message_index=len(self.messages) - 1,
+                    result_content=tool_message.get("content", "") or "",
+                )
                 total_tool_calls += 1
 
         # Max steps reached
