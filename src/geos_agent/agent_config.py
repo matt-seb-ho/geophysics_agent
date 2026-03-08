@@ -104,7 +104,7 @@ class AgentConfig:
     # Context configuration
     include_primer: bool = True  # Include GEOS_PRIMER.md in agent context at startup
     enable_context_compaction: bool = True  # Condense old context before model calls
-    context_compaction_trigger_tokens: int = 160000  # Auto-compact once the current prompt context reaches this approximate token threshold
+    context_compaction_trigger_tokens: int = 20000  # Auto-compact once the current prompt context reaches this approximate token threshold
     context_compaction_keep_recent_messages: int = 8  # Common retention windows for coding agents are around 6-10 recent messages
     context_compaction_summary_max_tokens: int = 500  # Similar to common ~2000-char compaction summaries (~500 tokens)
     context_compaction_user_max_tokens: int = 320  # Keep compacted older user turns informative without crowding the summary budget
