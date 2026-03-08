@@ -19,7 +19,7 @@ Usage:
     # Use specific model
     uv run python scripts/eval/llm_judge_xml.py \
         --ground-truth-dir gt_dir --generated-dir gen_dir \
-        --model "anthropic/claude-3.5-sonnet"
+        --model "anthropic/claude-4.6-sonnet"
 """
 
 import argparse
@@ -282,7 +282,7 @@ Provide your evaluation as JSON:"""
 
 def _call_llm_judge(
     prompt: str,
-    model: str = "anthropic/claude-3.5-sonnet",
+    model: str = "anthropic/claude-4.6-sonnet",
     api_key: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -351,7 +351,7 @@ def _call_llm_judge(
 def judge_xml_with_llm(
     ground_truth_xml: str,
     generated_xml: str,
-    model: str = "anthropic/claude-3.5-sonnet",
+    model: str = "anthropic/claude-4.6-sonnet",
     api_key: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -373,7 +373,7 @@ def judge_xml_with_llm(
 def judge_xml_bundle_with_llm(
     ground_truth_bundle: str,
     generated_bundle: str,
-    model: str = "anthropic/claude-3.5-sonnet",
+    model: str = "anthropic/claude-4.6-sonnet",
     api_key: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -489,8 +489,8 @@ def main():
         "--model",
         "-m",
         type=str,
-        default="anthropic/claude-3.5-sonnet",
-        help="OpenRouter model name (default: anthropic/claude-3.5-sonnet)"
+        default="anthropic/claude-4.6-sonnet",
+        help="OpenRouter model name (default: anthropic/claude-4.6-sonnet)"
     )
     parser.add_argument(
         "--output",
