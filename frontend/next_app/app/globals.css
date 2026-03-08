@@ -1,0 +1,211 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Design tokens ─────────────────────────────────────────────────────── */
+:root {
+  /* Background layers */
+  --bg-base:     #0c0c0c;
+  --bg-panel:    #111111;
+  --bg-surface:  #171717;
+  --bg-elevated: #1d1d1d;
+  --bg-hover:    #222222;
+  --bg-active:   #292929;
+
+  /* Borders */
+  --border-faint:  #161616;
+  --border-subtle: #1f1f1f;
+  --border-mid:    #282828;
+  --border-strong: #353535;
+
+  /* Text */
+  --text-primary:   #c0c0c0;
+  --text-secondary: #666666;
+  --text-dim:       #404040;
+  --text-bright:    #e4e4e4;
+  --text-code:      #93c5fd;
+
+  /* MATLAB orange accent */
+  --accent:          #e07810;
+  --accent-bright:   #f7a244;
+  --accent-dim:      rgba(224, 120, 16, 0.25);
+  --accent-bg:       rgba(224, 120, 16, 0.06);
+  --accent-border:   rgba(224, 120, 16, 0.3);
+
+  /* Semantic */
+  --success:     #4d8a5f;
+  --success-bg:  rgba(77, 138, 95, 0.1);
+  --error:       #bf3b30;
+  --error-bg:    rgba(191, 59, 48, 0.1);
+  --warning:     #c47f0a;
+  --warning-bg:  rgba(196, 127, 10, 0.1);
+  --info:        #3a72c4;
+  --info-bg:     rgba(58, 114, 196, 0.1);
+
+  /* Tool blocks */
+  --tool-bg:        rgba(24, 38, 60, 0.4);
+  --tool-border:    #1e3050;
+  --tool-text:      #7db9e8;
+  --thinking-bg:    rgba(18, 18, 18, 0.9);
+  --thinking-border:#202020;
+
+  /* Layout */
+  --sidebar-w:  252px;
+  --filetree-w: 252px;
+  --header-h:   36px;
+
+  /* Typography */
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 12.5px;
+}
+
+/* ─── Reset ─────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #__next {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar            { width: 4px; height: 4px; }
+::-webkit-scrollbar-track      { background: transparent; }
+::-webkit-scrollbar-thumb      { background: var(--border-strong); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover{ background: var(--text-dim); }
+
+/* ─── Selection ──────────────────────────────────────────────────────────── */
+::selection { background: var(--accent-dim); color: var(--text-bright); }
+
+/* ─── Code ───────────────────────────────────────────────────────────────── */
+code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-elevated);
+  padding: 1px 5px;
+  border-radius: 2px;
+  color: var(--text-code);
+}
+pre {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-mid);
+  border-radius: 3px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 0.85em;
+  color: var(--text-primary);
+}
+pre code { background: transparent; padding: 0; color: inherit; }
+
+/* ─── Animations ─────────────────────────────────────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse-border {
+  0%, 100% { border-color: var(--border-mid); }
+  50%       { border-color: var(--accent-border); }
+}
+
+.cursor-blink::after {
+  content: '▋';
+  color: var(--accent);
+  animation: blink 1s step-end infinite;
+  font-size: 0.9em;
+  margin-left: 1px;
+}
+.fade-up  { animation: fade-up 0.15s ease-out; }
+.spinning { animation: spin 0.8s linear infinite; }
+.pulse-border { animation: pulse-border 2s ease-in-out infinite; }
+
+/* ─── Markdown content ───────────────────────────────────────────────────── */
+.md p                { margin-bottom: 0.45em; }
+.md p:last-child     { margin-bottom: 0; }
+.md ul, .md ol       { padding-left: 1.3em; margin-bottom: 0.45em; }
+.md li               { margin-bottom: 0.15em; }
+.md h1               { font-size: 1.1em; font-weight: 600; color: var(--text-bright); margin: 0.9em 0 0.4em; }
+.md h2               { font-size: 1.05em; font-weight: 600; color: var(--text-bright); margin: 0.8em 0 0.35em; }
+.md h3               { font-size: 1em; font-weight: 500; color: var(--text-bright); margin: 0.7em 0 0.3em; }
+.md blockquote       { border-left: 2px solid var(--accent); padding-left: 0.8em; color: var(--text-secondary); margin: 0.5em 0; }
+.md table            { border-collapse: collapse; width: 100%; margin: 0.5em 0; font-size: 0.88em; }
+.md th, .md td       { border: 1px solid var(--border-mid); padding: 3px 8px; text-align: left; }
+.md th               { background: var(--bg-elevated); color: var(--text-bright); }
+.md hr               { border: none; border-top: 1px solid var(--border-mid); margin: 0.8em 0; }
+.md a                { color: var(--accent); text-decoration: none; }
+.md a:hover          { text-decoration: underline; }
+.md strong           { color: var(--text-bright); font-weight: 600; }
+
+/* ─── Form elements ──────────────────────────────────────────────────────── */
+input[type="text"],
+input[type="number"],
+input[type="range"],
+select,
+textarea {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-mid);
+  color: var(--text-primary);
+  border-radius: 2px;
+  outline: none;
+}
+input[type="text"]:focus,
+input[type="number"]:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent-border);
+}
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  border: none;
+  background: var(--border-strong);
+  border-radius: 2px;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+input[type="range"]:focus { border-color: transparent; }
+
+select option { background: var(--bg-elevated); }
+
+/* ─── Checkbox ───────────────────────────────────────────────────────────── */
+input[type="checkbox"] {
+  width: 12px;
+  height: 12px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+/* ─── Divider ────────────────────────────────────────────────────────────── */
+.divider {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 8px 0;
+}
