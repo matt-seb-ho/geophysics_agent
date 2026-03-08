@@ -103,14 +103,13 @@ class AgentConfig:
 
     # Context configuration
     include_primer: bool = True  # Include GEOS_PRIMER.md in agent context at startup
-    enable_context_projection: bool = True  # Condense old context before model calls
-    context_projection_trigger_tokens: int = 200000  # Auto-compact once history reaches this estimated token count
-    context_projection_trigger_chars: int = 0  # Legacy char-based fallback trigger; 0 disables it
-    context_projection_keep_recent_messages: int = 3  # Keep only a tiny raw tail
-    context_projection_summary_max_chars: int = 1500  # Max chars for compacted history summary
-    context_projection_user_max_chars: int = 2500  # Cap older user messages
-    context_projection_max_string_chars: int = 220  # Cap long strings in compacted payloads
-    context_projection_max_list_items: int = 3  # Cap list lengths in compacted payloads
+    enable_context_compaction: bool = True  # Condense old context before model calls
+    context_compaction_trigger_tokens: int = 160000  # Auto-compact once the current prompt context reaches this approximate token threshold
+    context_compaction_keep_recent_messages: int = 8  # Common retention windows for coding agents are around 6-10 recent messages
+    context_compaction_summary_max_tokens: int = 500  # Similar to common ~2000-char compaction summaries (~500 tokens)
+    context_compaction_user_max_tokens: int = 320  # Keep compacted older user turns informative without crowding the summary budget
+    context_compaction_max_string_tokens: int = 96  # Larger previews preserve filenames/errors/snippets better than ultra-short excerpts
+    context_compaction_max_list_items: int = 5  # Small preview list, but less lossy than 3 for tool-heavy structured payloads
     context_pruning: ContextPruningConfig = field(default_factory=ContextPruningConfig)
 
     # Dynamic cheatsheet (cross-session memory)

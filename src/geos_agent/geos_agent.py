@@ -241,12 +241,13 @@ class GeosAgent:
                     t.blocking = False
 
         self._pending_user_input: Optional[dict] = None
-        self._last_projection_stats: Dict[str, Any] = {
-            "enabled": bool(self.config.enable_context_projection),
+        self._last_compaction_stats: Dict[str, Any] = {
+            "enabled": bool(self.config.enable_context_compaction),
             "active": False,
             "original_chars": 0,
-            "projected_chars": 0,
-            "messages_projected": 0,
+            "compacted_chars": 0,
+            "cumulative_prompt_tokens": 0,
+            "messages_compacted": 0,
         }
         self._last_pruning_stats: Dict[str, Any] = {
             "enabled": bool(self.config.context_pruning.enabled),
@@ -332,7 +333,7 @@ class GeosAgent:
             "tool_responses": tool_responses,
             "summary": summary,
             "usage": self.client.get_token_usage(),
-            "context_projection": self._last_projection_stats,
+            "context_compaction": self._last_compaction_stats,
             "context_pruning": self._last_pruning_stats,
         }
 
@@ -360,7 +361,7 @@ class GeosAgent:
         return f"{text[:max_chars]}\n...[truncated {omitted} chars]..."
 
     def _estimate_message_payload_chars(self, messages: List[Dict[str, Any]]) -> int:
-        """Rough payload estimator for context projection decisions."""
+        """Rough payload estimator for context compaction decisions."""
         total = 0
         for msg in messages:
             total += len(msg.get("content", "") or "")
@@ -374,11 +375,16 @@ class GeosAgent:
         chars = self._estimate_message_payload_chars(messages)
         return max(0, (chars + 3) // 4)
 
+    @staticmethod
+    def _token_budget_to_chars(tokens: int, minimum_chars: int) -> int:
+        """Convert an approximate token budget to a character cap for truncation."""
+        return max(minimum_chars, max(0, tokens) * 4)
+
     def _compact_data_for_context(self, value: Any, depth: int = 0) -> Any:
         """Recursively compact large tool payloads for model context."""
         max_depth = 4
-        max_str = max(120, self.config.context_projection_max_string_chars)
-        max_list = max(1, self.config.context_projection_max_list_items)
+        max_str = self._token_budget_to_chars(self.config.context_compaction_max_string_tokens, 120)
+        max_list = max(1, self.config.context_compaction_max_list_items)
         max_dict_keys = 30
 
         heavy_string_keys = {
@@ -425,7 +431,7 @@ class GeosAgent:
 
     def _sanitize_tool_arguments_for_context(self, tool_name: str, args_str: str) -> str:
         """Condense historical tool-call arguments (especially large write/edit payloads)."""
-        max_str = max(120, self.config.context_projection_max_string_chars)
+        max_str = self._token_budget_to_chars(self.config.context_compaction_max_string_tokens, 120)
         try:
             data = json.loads(args_str or "{}")
         except Exception:
@@ -437,59 +443,60 @@ class GeosAgent:
         compact: Dict[str, Any] = {}
         for key, val in data.items():
             if key in {"content", "search_block", "replace_block", "code"} and isinstance(val, str):
-                compact[key] = f"<omitted {len(val)} chars>"
-                compact[f"{key}_preview"] = self._truncate_text(val, min(220, max_str))
+                compact[key] = self._truncate_text(val, min(220, max_str))
             else:
                 compact[key] = self._compact_data_for_context(val)
 
-        compact["_projection"] = f"args_condensed:{tool_name}"
         return json.dumps(compact, ensure_ascii=False)
 
     def _compact_tool_result_for_context(self, content: str, tool_name: Optional[str]) -> str:
         """Condense historical tool outputs while preserving key metadata."""
-        max_str = max(120, self.config.context_projection_max_string_chars)
+        max_str = self._token_budget_to_chars(self.config.context_compaction_max_string_tokens, 120)
 
         try:
             parsed = json.loads(content)
             compact = self._compact_data_for_context(parsed)
             if isinstance(compact, dict):
-                compact["_projection"] = "result_condensed"
+                compact["_compaction"] = "result_condensed"
                 if tool_name:
                     compact["_tool"] = tool_name
             return json.dumps(compact, ensure_ascii=False)
         except Exception:
             return self._truncate_text(content, max_str)
 
-    def _project_message_for_context(
+    def _compact_message_for_context(
         self,
         msg: Dict[str, Any],
         tool_name_by_call_id: Dict[str, str],
     ) -> Dict[str, Any]:
-        """Project an old message into a compact form suitable for model context."""
+        """Compact an old message into a smaller form suitable for model context."""
         role = msg.get("role")
 
         if role == "user":
-            max_user = max(300, self.config.context_projection_user_max_chars)
+            max_user = self._token_budget_to_chars(self.config.context_compaction_user_max_tokens, 300)
             return {
                 "role": "user",
                 "content": self._truncate_text(msg.get("content", "") or "", max_user),
             }
 
         if role == "assistant":
-            max_assistant = max(400, self.config.context_projection_max_string_chars * 2)
-            projected: Dict[str, Any] = {
+            max_assistant = self._token_budget_to_chars(
+                self.config.context_compaction_max_string_tokens * 2,
+                400,
+            )
+            compacted: Dict[str, Any] = {
                 "role": "assistant",
                 "content": self._truncate_text(msg.get("content", "") or "", max_assistant),
             }
             if "tool_calls" in msg:
-                projected_calls = []
+                compacted_calls = []
                 for tc in msg.get("tool_calls", []):
                     fn = tc.get("function", {}) or {}
                     tc_id = tc.get("id")
                     tc_name = fn.get("name", "")
                     if tc_id and tc_name:
                         tool_name_by_call_id[tc_id] = tc_name
-                    projected_calls.append(
+                    compacted_calls.append(
                         {
                             "id": tc_id,
                             "type": "function",
@@ -502,8 +509,8 @@ class GeosAgent:
                             },
                         }
                     )
-                projected["tool_calls"] = projected_calls
-            return projected
+                compacted["tool_calls"] = compacted_calls
+            return compacted
 
         if role == "tool":
             tool_call_id = msg.get("tool_call_id")
@@ -520,13 +527,19 @@ class GeosAgent:
         # System and any unknown role are passed through untouched.
         return msg
 
-    def _summarize_messages_for_projection(self, messages: List[Dict[str, Any]]) -> str:
+    def _summarize_messages_for_compaction(self, messages: List[Dict[str, Any]]) -> str:
         """Create a compact timeline summary of older conversation context."""
         if not messages:
             return ""
 
-        max_summary_chars = max(800, self.config.context_projection_summary_max_chars)
-        max_line_chars = max(120, self.config.context_projection_max_string_chars)
+        max_summary_chars = self._token_budget_to_chars(
+            self.config.context_compaction_summary_max_tokens,
+            800,
+        )
+        max_line_chars = self._token_budget_to_chars(
+            self.config.context_compaction_max_string_tokens,
+            120,
+        )
         tool_name_by_call_id: Dict[str, str] = {}
 
         lines = [
@@ -578,49 +591,50 @@ class GeosAgent:
         return self._truncate_text("\n".join(lines), max_summary_chars)
 
     def _build_model_messages(self) -> List[Dict[str, Any]]:
-        """Build projected messages for the model while keeping raw history for logging."""
+        """Build compacted messages for the model while keeping raw history for logging."""
         context_messages = self._context_pruning.build_model_messages(self.messages)
         self._last_pruning_stats = dict(self._context_pruning.last_stats)
 
-        if not self.config.enable_context_projection:
-            self._last_projection_stats = {
+        if not self.config.enable_context_compaction:
+            cumulative_prompt_tokens = int(self.client.get_token_usage().get("prompt_tokens", 0) or 0)
+            self._last_compaction_stats = {
                 "enabled": False,
                 "active": False,
                 "original_chars": self._estimate_message_payload_chars(context_messages),
-                "projected_chars": self._estimate_message_payload_chars(context_messages),
+                "compacted_chars": self._estimate_message_payload_chars(context_messages),
                 "original_tokens_est": self._estimate_message_payload_tokens(context_messages),
-                "projected_tokens_est": self._estimate_message_payload_tokens(context_messages),
-                "messages_projected": 0,
+                "compacted_tokens_est": self._estimate_message_payload_tokens(context_messages),
+                "cumulative_prompt_tokens": cumulative_prompt_tokens,
+                "messages_compacted": 0,
             }
             return context_messages
 
         original_chars = self._estimate_message_payload_chars(context_messages)
         original_tokens = self._estimate_message_payload_tokens(context_messages)
-        token_trigger = max(0, self.config.context_projection_trigger_tokens)
-        char_trigger = max(0, self.config.context_projection_trigger_chars)
-        should_project = False
+        cumulative_prompt_tokens = int(self.client.get_token_usage().get("prompt_tokens", 0) or 0)
+        token_trigger = max(0, self.config.context_compaction_trigger_tokens)
+        should_compact = False
         if token_trigger > 0 and original_tokens >= token_trigger:
-            should_project = True
-        elif char_trigger > 0 and original_chars >= char_trigger:
-            should_project = True
+            should_compact = True
 
-        if not should_project:
-            self._last_projection_stats = {
+        if not should_compact:
+            self._last_compaction_stats = {
                 "enabled": True,
                 "active": False,
                 "original_chars": original_chars,
-                "projected_chars": original_chars,
+                "compacted_chars": original_chars,
                 "original_tokens_est": original_tokens,
-                "projected_tokens_est": original_tokens,
-                "messages_projected": 0,
+                "compacted_tokens_est": original_tokens,
+                "cumulative_prompt_tokens": cumulative_prompt_tokens,
+                "messages_compacted": 0,
             }
             return context_messages
 
-        keep_recent = max(0, self.config.context_projection_keep_recent_messages)
+        keep_recent = max(0, self.config.context_compaction_keep_recent_messages)
         cutoff = max(1, len(context_messages) - keep_recent)
         tool_name_by_call_id: Dict[str, str] = {}
-        projected: List[Dict[str, Any]] = []
-        projected_count = 0
+        compacted_messages: List[Dict[str, Any]] = []
+        compacted_count = 0
         recent_compact_window = 2
 
         system_message = context_messages[0]
@@ -637,41 +651,42 @@ class GeosAgent:
                     if tc_id and tc_name:
                         tool_name_by_call_id[tc_id] = tc_name
 
-        projected.append(system_message)
+        compacted_messages.append(system_message)
 
-        summary_text = self._summarize_messages_for_projection(older_messages)
+        summary_text = self._summarize_messages_for_compaction(older_messages)
         if summary_text:
-            projected.append({"role": "assistant", "content": summary_text})
-            projected_count += len(older_messages)
+            compacted_messages.append({"role": "assistant", "content": summary_text})
+            compacted_count += len(older_messages)
 
         # Keep only a tiny raw tail; compact the rest of the recent window.
         for idx, msg in enumerate(recent_messages):
             if idx < max(0, len(recent_messages) - recent_compact_window):
-                projected.append(self._project_message_for_context(msg, tool_name_by_call_id))
-                projected_count += 1
+                compacted_messages.append(self._compact_message_for_context(msg, tool_name_by_call_id))
+                compacted_count += 1
             else:
-                projected.append(msg)
+                compacted_messages.append(msg)
 
-        projected_chars = self._estimate_message_payload_chars(projected)
-        projected_tokens = self._estimate_message_payload_tokens(projected)
-        self._last_projection_stats = {
+        compacted_chars = self._estimate_message_payload_chars(compacted_messages)
+        compacted_tokens = self._estimate_message_payload_tokens(compacted_messages)
+        self._last_compaction_stats = {
             "enabled": True,
             "active": True,
             "original_chars": original_chars,
-            "projected_chars": projected_chars,
+            "compacted_chars": compacted_chars,
             "original_tokens_est": original_tokens,
-            "projected_tokens_est": projected_tokens,
-            "messages_projected": projected_count,
+            "compacted_tokens_est": compacted_tokens,
+            "cumulative_prompt_tokens": cumulative_prompt_tokens,
+            "messages_compacted": compacted_count,
             "keep_recent_messages": keep_recent,
-            "summary_chars": len(summary_text),
+            "summary_tokens_est": max(0, (len(summary_text) + 3) // 4),
         }
-        return projected
+        return compacted_messages
 
     def _call_model_streaming(self) -> tuple[str, List[Any], Dict[str, int]]:
         """Call LLM with streaming. All API details handled by client."""
         model_messages = self._build_model_messages()
-        if self._last_projection_stats.get("active"):
-            self._log("context_projection", **self._last_projection_stats)
+        if self._last_compaction_stats.get("active"):
+            self._log("context_compaction", **self._last_compaction_stats)
         return self.client.chat_completion_streaming(
             messages=model_messages,
             tools=self._get_tool_specs(),

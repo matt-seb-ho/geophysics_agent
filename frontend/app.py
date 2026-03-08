@@ -145,7 +145,7 @@ if "sidebar_prompt_cache_ttl" not in st.session_state:
     st.session_state.sidebar_prompt_cache_ttl = "default"
 
 if "sidebar_auto_compact_after_tokens" not in st.session_state:
-    st.session_state.sidebar_auto_compact_after_tokens = 200000
+    st.session_state.sidebar_auto_compact_after_tokens = 160000
 
 if "agent_max_steps" not in st.session_state:
     st.session_state.agent_max_steps = 100
@@ -249,7 +249,7 @@ def _get_current_agent_settings() -> tuple[dict, str | None]:
             else st.session_state.get("sidebar_prompt_cache_ttl", "default")
         ),
         "auto_compact_after_tokens": int(
-            st.session_state.get("sidebar_auto_compact_after_tokens", 200000)
+            st.session_state.get("sidebar_auto_compact_after_tokens", 160000)
         ),
         "openrouter_extra_body": extra_body,
     }
@@ -318,8 +318,8 @@ with st.sidebar:
             step=10000,
             key="sidebar_auto_compact_after_tokens",
             help=(
-                "Estimated prompt-history token threshold for local context "
-                "projection and stronger dynamic-pruning/compression nudges. "
+                "Current prompt-context token threshold for local context "
+                "compaction and stronger dynamic-pruning/compression nudges. "
                 "Set to 0 to disable the threshold."
             ),
         )
@@ -512,7 +512,7 @@ def _create_agent() -> GeosAgent:
         reasoning=settings["reasoning"],
         openrouter_prompt_caching=settings["prompt_caching"],
         openrouter_prompt_cache_ttl=settings["prompt_cache_ttl"],
-        context_projection_trigger_tokens=settings["auto_compact_after_tokens"],
+        context_compaction_trigger_tokens=settings["auto_compact_after_tokens"],
         openrouter_extra_body=settings["openrouter_extra_body"],
         mode="interactive",
     )
