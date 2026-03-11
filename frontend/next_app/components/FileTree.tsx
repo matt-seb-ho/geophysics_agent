@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Folder,
   FolderOpen,
@@ -42,10 +42,10 @@ function fileColor(name: string): string {
   if (["csv", "tsv"].includes(ext)) return "#4d8a5f";
   if (["py"].includes(ext))         return "#4a8fbf";
   if (["json"].includes(ext))       return "#9b7ec4";
-  if (["log", "txt"].includes(ext)) return "#666666";
+  if (["log", "txt", "md"].includes(ext)) return "var(--text-secondary)";
   if (["png", "jpg", "svg"].includes(ext)) return "#c47f0a";
   if (["hdf5", "h5", "vtk"].includes(ext)) return "#bf3b30";
-  return "#888888";
+  return "var(--text-primary)";
 }
 
 function formatSize(bytes?: number): string {
@@ -60,10 +60,15 @@ interface NodeProps {
   depth: number;
   sessionId: string;
   onOpenFile?: (path: string, name: string) => void;
+  openPaths: Set<string>;
 }
 
-function TreeNode({ node, depth, sessionId, onOpenFile }: NodeProps) {
-  const [expanded, setExpanded] = useState(depth === 0 || node.name === "inputs" || node.name === "outputs");
+function TreeNode({ node, depth, sessionId, onOpenFile, openPaths }: NodeProps) {
+  const [expanded, setExpanded] = useState(depth === 0);
+
+  useEffect(() => {
+    if (openPaths.has(node.path)) setExpanded(true);
+  }, [openPaths, node.path]);
 
   const indent = depth * 12;
 
@@ -83,7 +88,7 @@ function TreeNode({ node, depth, sessionId, onOpenFile }: NodeProps) {
             border: "none",
             cursor: hasChildren ? "pointer" : "default",
             color: "var(--text-secondary)",
-            fontSize: "11.5px",
+            fontSize: "12.5px",
             fontFamily: "var(--font-mono)",
             textAlign: "left",
           }}
@@ -119,6 +124,7 @@ function TreeNode({ node, depth, sessionId, onOpenFile }: NodeProps) {
                 depth={depth + 1}
                 sessionId={sessionId}
                 onOpenFile={onOpenFile}
+                openPaths={openPaths}
               />
             ))}
             {node.children.length === 0 && (
@@ -126,7 +132,7 @@ function TreeNode({ node, depth, sessionId, onOpenFile }: NodeProps) {
                 style={{
                   padding: `1px 8px 1px ${8 + indent + 22}px`,
                   color: "var(--text-dim)",
-                  fontSize: "11px",
+                  fontSize: "12px",
                   fontStyle: "italic",
                 }}
               >
@@ -153,7 +159,7 @@ function TreeNode({ node, depth, sessionId, onOpenFile }: NodeProps) {
         gap: 5,
         padding: `2px 8px 2px ${8 + indent + 15}px`,
         color: "var(--text-secondary)",
-        fontSize: "11.5px",
+        fontSize: "12.5px",
         textDecoration: "none",
         cursor: "pointer",
       }}
@@ -175,6 +181,20 @@ function TreeNode({ node, depth, sessionId, onOpenFile }: NodeProps) {
   );
 }
 
+function collectNewFolderPaths(oldNode: FileNode | null, newNode: FileNode, result: Set<string>) {
+  if (newNode.type !== "directory") return;
+  const oldChildren = (oldNode?.type === "directory" ? oldNode.children : null) ?? [];
+  const newChildren = newNode.children ?? [];
+  const oldSet = new Set(oldChildren.map((c) => c.path));
+  if (newChildren.some((c) => !oldSet.has(c.path))) result.add(newNode.path);
+  for (const child of newChildren) {
+    if (child.type === "directory") {
+      const oldChild = oldChildren.find((c) => c.path === child.path) ?? null;
+      collectNewFolderPaths(oldChild, child, result);
+    }
+  }
+}
+
 interface Props {
   sessionId: string | null;
   refreshKey: number;
@@ -187,6 +207,8 @@ export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenF
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<string>("");
+  const [openPaths, setOpenPaths] = useState<Set<string>>(new Set());
+  const prevTreeRef = useRef<FileNode | null>(null);
 
   const load = useCallback(async () => {
     if (!sessionId) return;
@@ -194,6 +216,12 @@ export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenF
     setError(null);
     try {
       const data = await getFileTree(sessionId);
+      if (prevTreeRef.current && data.tree) {
+        const newPaths = new Set<string>();
+        collectNewFolderPaths(prevTreeRef.current, data.tree, newPaths);
+        if (newPaths.size > 0) setOpenPaths((prev) => new Set([...Array.from(prev), ...Array.from(newPaths)]));
+      }
+      prevTreeRef.current = data.tree;
       setTree(data.tree);
       setWorkspace(data.workspace);
     } catch (e) {
@@ -207,7 +235,7 @@ export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenF
     load();
   }, [load, refreshKey]);
 
-  const displayPath = workspace || workspacePath || "—";
+  const displayPath = workspace || workspacePath || "";
   const shortPath =
     displayPath.length > 28
       ? "…" + displayPath.slice(displayPath.length - 27)
@@ -220,7 +248,8 @@ export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenF
         flexDirection: "column",
         height: "100%",
         background: "var(--bg-panel)",
-        borderLeft: "1px solid var(--border-subtle)",
+        borderLeft: "1px solid var(--border-strong)",
+        boxShadow: "-1px 0 0 var(--border-faint)",
         width: "var(--filetree-w)",
         flexShrink: 0,
       }}
@@ -230,7 +259,7 @@ export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenF
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          justifyContent: "center",
           padding: "0 10px",
           height: "var(--header-h)",
           borderBottom: "1px solid var(--border-subtle)",
@@ -247,33 +276,6 @@ export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenF
         >
           workspace
         </span>
-        <button
-          onClick={load}
-          disabled={loading || !sessionId}
-          title="Refresh"
-          style={{
-            background: "transparent",
-            border: "none",
-            cursor: loading || !sessionId ? "default" : "pointer",
-            color: "var(--text-dim)",
-            fontSize: "12px",
-            padding: "2px 4px",
-            borderRadius: 2,
-          }}
-          onMouseEnter={(e) => {
-            if (!loading && sessionId)
-              (e.currentTarget as HTMLElement).style.color = "var(--accent)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.color = "var(--text-dim)";
-          }}
-        >
-          {loading ? (
-            <span className="spinning" style={{ display: "inline-block" }}>↻</span>
-          ) : (
-            "↻"
-          )}
-        </button>
       </div>
 
       {/* Workspace path */}
@@ -288,7 +290,7 @@ export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenF
           title={displayPath}
           style={{
             color: "var(--text-dim)",
-            fontSize: "10.5px",
+            fontSize: "11.5px",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -305,7 +307,7 @@ export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenF
             style={{
               padding: "16px 12px",
               color: "var(--text-dim)",
-              fontSize: "11.5px",
+              fontSize: "12.5px",
               textAlign: "center",
             }}
           >
@@ -316,7 +318,7 @@ export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenF
             style={{
               padding: "10px 12px",
               color: "var(--error)",
-              fontSize: "11.5px",
+              fontSize: "12.5px",
             }}
           >
             {error}
@@ -326,20 +328,20 @@ export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenF
             style={{
               padding: "16px 12px",
               color: "var(--text-dim)",
-              fontSize: "11.5px",
+              fontSize: "12.5px",
               textAlign: "center",
             }}
           >
             loading...
           </div>
         ) : tree ? (
-          <TreeNode node={tree} depth={0} sessionId={sessionId} onOpenFile={onOpenFile} />
+          <TreeNode node={tree} depth={0} sessionId={sessionId} onOpenFile={onOpenFile} openPaths={openPaths} />
         ) : (
           <div
             style={{
               padding: "16px 12px",
               color: "var(--text-dim)",
-              fontSize: "11.5px",
+              fontSize: "12.5px",
               textAlign: "center",
             }}
           >

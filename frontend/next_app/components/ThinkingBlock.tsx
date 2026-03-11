@@ -29,7 +29,7 @@ export default function ThinkingBlock({ content }: Props) {
           border: "none",
           cursor: "pointer",
           color: "var(--text-dim)",
-          fontSize: "11px",
+          fontSize: "12px",
           fontFamily: "var(--font-mono)",
           textAlign: "left",
         }}
@@ -40,9 +40,6 @@ export default function ThinkingBlock({ content }: Props) {
         <span style={{ color: "var(--text-dim)", letterSpacing: "0.03em" }}>
           [reasoning]
         </span>
-        <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10 }}>
-          {content.length.toLocaleString()} chars
-        </span>
       </button>
 
       {open && (
@@ -51,7 +48,7 @@ export default function ThinkingBlock({ content }: Props) {
             padding: "6px 12px 8px",
             borderTop: "1px solid var(--thinking-border)",
             color: "var(--text-dim)",
-            fontSize: "11.5px",
+            fontSize: "12.5px",
             lineHeight: 1.6,
             whiteSpace: "pre-wrap",
             fontStyle: "italic",

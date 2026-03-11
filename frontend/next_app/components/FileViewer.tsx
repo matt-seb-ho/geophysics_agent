@@ -1,16 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
-import { X, ArrowLeft } from "lucide-react";
 import { getFileContent, fileUrl } from "../lib/api";
 import { OpenTab } from "../lib/types";
 
 interface Props {
-  tabs: OpenTab[];
-  activeTab: string | null;
+  file: OpenTab | null;
   sessionId: string | null;
-  onSelectTab: (path: string) => void;
-  onCloseTab: (path: string) => void;
-  onBackToTree: () => void;
 }
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "bmp", "webp"]);
@@ -21,30 +16,24 @@ function getExt(name: string): string {
 }
 
 export default function FileViewer({
-  tabs,
-  activeTab,
+  file,
   sessionId,
-  onSelectTab,
-  onCloseTab,
-  onBackToTree,
 }: Props) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const activeFile = tabs.find((t) => t.path === activeTab);
-  const ext = activeFile ? getExt(activeFile.name) : "";
+  const ext = file ? getExt(file.name) : "";
   const isImage = IMAGE_EXTS.has(ext);
   const isBinary = BINARY_EXTS.has(ext);
-
   useEffect(() => {
-    if (!sessionId || !activeTab || isImage || isBinary) {
+    if (!sessionId || !file || isImage || isBinary) {
       setContent(null);
       return;
     }
     setLoading(true);
     setError(null);
-    getFileContent(sessionId, activeTab)
+    getFileContent(sessionId, file.path)
       .then((text) => {
         setContent(text);
         setLoading(false);
@@ -53,7 +42,7 @@ export default function FileViewer({
         setError(String(e));
         setLoading(false);
       });
-  }, [sessionId, activeTab, isImage, isBinary]);
+  }, [sessionId, file, isImage, isBinary]);
 
   return (
     <div
@@ -61,125 +50,65 @@ export default function FileViewer({
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        background: "var(--bg-panel)",
-        borderLeft: "1px solid var(--border-subtle)",
-        width: "var(--filetree-w)",
-        flexShrink: 0,
+        background: "var(--bg-base)",
       }}
     >
-      {/* Header */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "0 10px",
+          gap: 12,
+          padding: "0 14px",
           height: "var(--header-h)",
           borderBottom: "1px solid var(--border-subtle)",
           flexShrink: 0,
+          background: "var(--bg-panel)",
         }}
       >
-        <button
-          onClick={onBackToTree}
+        <div
           style={{
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            color: "var(--text-dim)",
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            fontSize: "10px",
-            fontFamily: "var(--font-mono)",
-            padding: "2px 4px",
+            color: "var(--text-bright)",
+            fontSize: "12px",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            minWidth: 0,
           }}
+          title={file?.path ?? ""}
         >
-          <ArrowLeft size={12} />
-          tree
-        </button>
+          {file?.path ?? "No file selected"}
+        </div>
         <span
           style={{
-            color: "var(--text-dim)",
+            color: "var(--text-secondary)",
             fontSize: "10px",
             letterSpacing: "0.08em",
             textTransform: "uppercase",
           }}
         >
-          files
+          preview
         </span>
       </div>
 
-      {/* Tab bar */}
-      <div
-        style={{
-          display: "flex",
-          overflowX: "auto",
-          borderBottom: "1px solid var(--border-faint)",
-          flexShrink: 0,
-        }}
-      >
-        {tabs.map((tab) => {
-          const isActive = tab.path === activeTab;
-          return (
-            <div
-              key={tab.path}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "4px 8px",
-                fontSize: "10.5px",
-                cursor: "pointer",
-                background: isActive ? "var(--bg-surface)" : "transparent",
-                borderBottom: isActive ? "2px solid var(--accent)" : "2px solid transparent",
-                color: isActive ? "var(--text-primary)" : "var(--text-dim)",
-                whiteSpace: "nowrap",
-                flexShrink: 0,
-              }}
-              onClick={() => onSelectTab(tab.path)}
-            >
-              <span>{tab.name}</span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseTab(tab.path);
-                }}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--text-dim)",
-                  display: "flex",
-                  alignItems: "center",
-                  padding: 0,
-                }}
-              >
-                <X size={10} />
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Content area */}
       <div style={{ flex: 1, overflowY: "auto", padding: 0 }}>
-        {!activeFile ? (
+        {!file ? (
           <div
             style={{
               padding: "20px 12px",
               color: "var(--text-dim)",
-              fontSize: "11px",
+              fontSize: "12px",
               textAlign: "center",
             }}
           >
             select a file
           </div>
         ) : isImage && sessionId ? (
-          <div style={{ padding: 8 }}>
+          <div style={{ padding: 12 }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={fileUrl(sessionId, activeTab!)}
-              alt={activeFile.name}
+              src={fileUrl(sessionId, file.path)}
+              alt={file.name}
               style={{
                 maxWidth: "100%",
                 border: "1px solid var(--border-mid)",
@@ -192,7 +121,7 @@ export default function FileViewer({
             style={{
               padding: "20px 12px",
               color: "var(--text-dim)",
-              fontSize: "11px",
+              fontSize: "12px",
               textAlign: "center",
             }}
           >
@@ -203,7 +132,7 @@ export default function FileViewer({
             style={{
               padding: "20px 12px",
               color: "var(--text-dim)",
-              fontSize: "11px",
+              fontSize: "12px",
               textAlign: "center",
             }}
           >
@@ -214,7 +143,7 @@ export default function FileViewer({
             style={{
               padding: "10px 12px",
               color: "var(--error)",
-              fontSize: "11px",
+              fontSize: "12px",
             }}
           >
             {error}
@@ -224,8 +153,8 @@ export default function FileViewer({
             style={{
               background: "transparent",
               border: "none",
-              padding: "8px 10px",
-              fontSize: "11px",
+              padding: "12px 14px",
+              fontSize: "12.5px",
               color: "var(--text-primary)",
               whiteSpace: "pre-wrap",
               wordBreak: "break-all",

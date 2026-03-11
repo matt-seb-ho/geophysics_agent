@@ -1,5 +1,6 @@
 "use client";
-import { Settings, Plus, MessageSquare } from "lucide-react";
+import { useEffect, useState } from "react";
+import { File, Plus, Settings } from "lucide-react";
 import { ChatSession, TokenUsage } from "../lib/types";
 
 interface Props {
@@ -8,58 +9,53 @@ interface Props {
   onSelectSession: (id: string) => void;
   onNewChat: () => void;
   onOpenSettings: () => void;
+  onDeleteSession: (id: string) => void;
+  onRenameSession: (id: string, name: string) => void;
+  onToggleSidebar?: () => void;
   tokenUsage: TokenUsage;
   isStreaming: boolean;
   apiKeyMissing: boolean;
   contextLength: number;
+  fileCounts: Record<string, number>;
 }
 
-function TokenBar({
-  label,
-  value,
-  max,
-  color,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  color: string;
-}) {
+function ContextBar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   return (
-    <div style={{ marginBottom: 5 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginBottom: 2,
-        }}
-      >
-        <span style={{ color: "var(--text-secondary)", fontSize: "10.5px" }}>
-          {label}
-        </span>
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+        <span style={{ color: "var(--text-secondary)", fontSize: "10.5px" }}>context</span>
         <span style={{ color: "var(--text-primary)", fontSize: "10.5px" }}>
-          {value.toLocaleString()}
+          {value.toLocaleString()} / {max.toLocaleString()}
         </span>
       </div>
-      <div
-        style={{
-          height: 3,
-          background: "var(--border-mid)",
-          borderRadius: 1,
-          overflow: "hidden",
-        }}
-      >
+      <div style={{ height: 3, background: "var(--border-mid)", borderRadius: 1, overflow: "hidden" }}>
         <div
           style={{
             height: "100%",
             width: `${pct}%`,
-            background: color,
+            background: pct > 85 ? "var(--error)" : pct > 65 ? "var(--warning)" : "var(--accent)",
             borderRadius: 1,
             transition: "width 0.3s ease",
           }}
         />
       </div>
+    </div>
+  );
+}
+
+function TokenRow({ label, value, color }: { label: string; value: number; color?: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10.5px", marginBottom: 2 }}>
+      <span style={{ color: "var(--text-secondary)" }}>{label}</span>
+      <span
+        style={{
+          color: value > 0 ? (color ?? "var(--text-primary)") : "var(--text-dim)",
+          fontWeight: value > 0 ? 500 : 400,
+        }}
+      >
+        {value.toLocaleString()}
+      </span>
     </div>
   );
 }
@@ -73,8 +69,7 @@ function formatRelativeTime(dateStr: string): string {
   if (mins < 60) return `${mins}m ago`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 export default function ChatHistorySidebar({
@@ -83,12 +78,40 @@ export default function ChatHistorySidebar({
   onSelectSession,
   onNewChat,
   onOpenSettings,
+  onDeleteSession,
+  onRenameSession,
   tokenUsage,
-  isStreaming,
   apiKeyMissing,
   contextLength,
+  fileCounts,
 }: Props) {
-  const maxTokens = contextLength > 0 ? contextLength : Math.max(tokenUsage.totalTokens * 1.2, 10000);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const contextMax = contextLength > 0 ? contextLength : 128000;
+  const contextValue = tokenUsage.turnPromptTokens ?? 0;
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [contextMenu]);
+
+  const startRename = (session: ChatSession) => {
+    setEditingId(session.id);
+    setDraftName(session.name || `Chat ${session.id.slice(0, 6)}`);
+  };
+
+  const commitRename = () => {
+    if (!editingId) return;
+    const next = draftName.trim();
+    if (next) {
+      onRenameSession(editingId, next);
+    }
+    setEditingId(null);
+    setDraftName("");
+  };
 
   return (
     <div
@@ -98,11 +121,11 @@ export default function ChatHistorySidebar({
         display: "flex",
         flexDirection: "column",
         background: "var(--bg-panel)",
-        borderRight: "1px solid var(--border-subtle)",
+        borderRight: "1px solid var(--border-strong)",
+        boxShadow: "1px 0 0 var(--border-faint)",
         height: "100%",
       }}
     >
-      {/* Header */}
       <div
         style={{
           padding: "0 12px",
@@ -115,23 +138,18 @@ export default function ChatHistorySidebar({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ color: "var(--accent)", fontSize: "13px", fontWeight: 600 }}>
-            GEOS
-          </span>
-          <span style={{ color: "var(--text-dim)", fontSize: "11px" }}>
-            agent v1.0
-          </span>
+          <span style={{ color: "var(--accent)", fontSize: "14px", fontWeight: 600 }}>GEOS</span>
+          <span style={{ color: "var(--text-dim)", fontSize: "12px" }}>agent v1.0</span>
         </div>
         <button
           onClick={onNewChat}
-          disabled={isStreaming}
           title="New chat"
           style={{
             background: "transparent",
             border: "1px solid var(--border-mid)",
             borderRadius: 2,
-            cursor: isStreaming ? "not-allowed" : "pointer",
-            color: "var(--text-dim)",
+            cursor: "pointer",
+            color: "var(--text-secondary)",
             display: "flex",
             alignItems: "center",
             padding: "2px 5px",
@@ -141,7 +159,6 @@ export default function ChatHistorySidebar({
         </button>
       </div>
 
-      {/* API key warning */}
       {apiKeyMissing && (
         <div
           style={{
@@ -151,94 +168,115 @@ export default function ChatHistorySidebar({
             borderRadius: 2,
             padding: "6px 8px",
             color: "var(--error)",
-            fontSize: "11px",
+            fontSize: "12px",
           }}
         >
           OPENROUTER_API_KEY not set
         </div>
       )}
 
-      {/* Chat history list */}
       <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
         {sessions.length === 0 ? (
-          <div
-            style={{
-              padding: "20px 12px",
-              color: "var(--text-dim)",
-              fontSize: "11px",
-              textAlign: "center",
-            }}
-          >
+          <div style={{ padding: "20px 12px", color: "var(--text-dim)", fontSize: "12px", textAlign: "center" }}>
             no conversations yet
           </div>
         ) : (
-          sessions.map((s) => {
-            const isActive = s.id === activeSessionId;
+          sessions.map((session) => {
+            const isActive = session.id === activeSessionId;
+            const fileCount = fileCounts[session.id] ?? 0;
             return (
-              <button
-                key={s.id}
-                onClick={() => onSelectSession(s.id)}
+              <div
+                key={session.id}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setContextMenu({ id: session.id, x: e.clientX, y: e.clientY });
+                }}
                 style={{
                   display: "flex",
-                  alignItems: "center",
-                  gap: 8,
                   width: "100%",
-                  padding: "6px 12px",
                   background: isActive ? "var(--accent-bg)" : "transparent",
-                  border: "none",
                   borderLeft: isActive ? "2px solid var(--accent)" : "2px solid transparent",
-                  cursor: "pointer",
-                  fontFamily: "var(--font-mono)",
-                  textAlign: "left",
                 }}
               >
-                <MessageSquare
-                  size={12}
+                <button
+                  onClick={() => onSelectSession(session.id)}
+                  onDoubleClick={() => startRename(session)}
                   style={{
-                    flexShrink: 0,
-                    color: isActive ? "var(--accent)" : "var(--text-dim)",
+                    flex: 1,
+                    minWidth: 0,
+                    padding: "6px 8px 6px 12px",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    fontFamily: "var(--font-mono)",
+                    textAlign: "left",
                   }}
-                />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      color: isActive ? "var(--accent)" : "var(--text-primary)",
-                      fontSize: "11.5px",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      fontWeight: isActive ? 500 : 400,
-                    }}
-                  >
-                    {s.name || `Chat ${s.id.slice(0, 6)}`}
-                  </div>
+                >
+                  {editingId === session.id ? (
+                    <input
+                      autoFocus
+                      value={draftName}
+                      onChange={(e) => setDraftName(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRename();
+                        if (e.key === "Escape") {
+                          setEditingId(null);
+                          setDraftName("");
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        width: "100%",
+                        background: "var(--bg-surface)",
+                        border: "1px solid var(--accent-border)",
+                        color: "var(--text-primary)",
+                        padding: "3px 6px",
+                        borderRadius: 2,
+                        fontFamily: "var(--font-mono)",
+                        fontSize: "12px",
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        color: isActive ? "var(--accent)" : "var(--text-primary)",
+                        fontSize: "12.5px",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        fontWeight: isActive ? 500 : 400,
+                      }}
+                    >
+                      {session.name || `Chat ${session.id.slice(0, 6)}`}
+                    </div>
+                  )}
                   <div
                     style={{
                       display: "flex",
                       gap: 8,
                       color: "var(--text-dim)",
-                      fontSize: "10px",
+                      fontSize: "11px",
                       marginTop: 1,
+                      alignItems: "center",
                     }}
                   >
-                    <span>{formatRelativeTime(s.lastMessageAt)}</span>
-                    <span>{s.messageCount} msgs</span>
+                    <span>{formatRelativeTime(session.lastMessageAt)}</span>
+                    {fileCount > 0 && (
+                      <span style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                        <File size={9} />
+                        {fileCount}
+                      </span>
+                    )}
                   </div>
-                </div>
-              </button>
+                </button>
+              </div>
             );
           })
         )}
       </div>
 
-      {/* Bottom: token usage + settings */}
-      <div
-        style={{
-          borderTop: "1px solid var(--border-subtle)",
-          padding: "10px 12px",
-          flexShrink: 0,
-        }}
-      >
+      <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "10px 12px", flexShrink: 0 }}>
         <div
           style={{
             color: "var(--text-dim)",
@@ -250,74 +288,99 @@ export default function ChatHistorySidebar({
         >
           token usage
         </div>
-        <TokenBar
-          label="input"
-          value={tokenUsage.promptTokens}
-          max={maxTokens}
-          color="var(--info)"
-        />
-        <TokenBar
-          label="output"
-          value={tokenUsage.completionTokens}
-          max={maxTokens}
-          color="var(--success)"
-        />
-        {/* Context window bar */}
-        {tokenUsage.contextTokensEst !== undefined && tokenUsage.contextTokensEst > 0 && (
-          <TokenBar
-            label="context"
-            value={tokenUsage.contextTokensEst}
-            max={tokenUsage.compactionThreshold ?? 100000}
-            color="var(--warning)"
-          />
-        )}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            borderTop: "1px solid var(--border-subtle)",
-            paddingTop: 5,
-            marginTop: 3,
-          }}
-        >
-          <span style={{ color: "var(--text-dim)", fontSize: "10.5px" }}>
-            total
-          </span>
-          <span
+        <ContextBar value={contextValue} max={contextMax} />
+        <TokenRow label="input" value={tokenUsage.promptTokens} color="var(--accent)" />
+        <TokenRow label="output" value={tokenUsage.completionTokens} color="var(--info)" />
+        <TokenRow label="total" value={tokenUsage.totalTokens} />
+        {(tokenUsage.cachedTokens !== undefined && tokenUsage.cachedTokens > 0) && (
+          <div
             style={{
-              color: tokenUsage.totalTokens > 0 ? "var(--accent)" : "var(--text-dim)",
-              fontSize: "11px",
-              fontWeight: 500,
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: "10px",
+              color: "var(--text-dim)",
+              marginTop: 1,
             }}
           >
-            {tokenUsage.totalTokens.toLocaleString()}
-          </span>
+            <span>cache r/w</span>
+            <span>
+              {(tokenUsage.cachedTokens ?? 0).toLocaleString()} / {(tokenUsage.cacheWriteTokens ?? 0).toLocaleString()}
+            </span>
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+          <button
+            onClick={onOpenSettings}
+            title="Settings"
+            style={{
+              background: "transparent",
+              border: "1px solid var(--border-mid)",
+              borderRadius: 2,
+              cursor: "pointer",
+              color: "var(--text-secondary)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 28,
+              height: 28,
+            }}
+          >
+            <Settings size={13} />
+          </button>
         </div>
-
-        {/* Settings gear */}
-        <button
-          onClick={onOpenSettings}
+      </div>
+      {contextMenu && (
+        <div
           style={{
-            width: "100%",
-            marginTop: 10,
-            padding: "6px",
-            background: "transparent",
+            position: "fixed",
+            top: contextMenu.y,
+            left: contextMenu.x,
+            background: "var(--bg-surface)",
             border: "1px solid var(--border-mid)",
-            borderRadius: 2,
-            cursor: "pointer",
-            fontFamily: "var(--font-mono)",
-            fontSize: "11px",
-            color: "var(--text-secondary)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 6,
+            borderRadius: 4,
+            boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
+            padding: 4,
+            zIndex: 310,
+            minWidth: 112,
           }}
         >
-          <Settings size={12} />
-          settings
-        </button>
-      </div>
+          {[
+            {
+              label: "Rename",
+              onClick: () => {
+                const target = sessions.find((session) => session.id === contextMenu.id);
+                if (target) startRename(target);
+              },
+            },
+            {
+              label: "Delete",
+              onClick: () => onDeleteSession(contextMenu.id),
+            },
+          ].map((item) => (
+            <button
+              key={item.label}
+              onClick={() => {
+                item.onClick();
+                setContextMenu(null);
+              }}
+              style={{
+                width: "100%",
+                background: "transparent",
+                border: "none",
+                color: "var(--text-primary)",
+                textAlign: "left",
+                padding: "7px 10px",
+                fontFamily: "var(--font-mono)",
+                fontSize: "11.5px",
+                cursor: "pointer",
+                borderRadius: 2,
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

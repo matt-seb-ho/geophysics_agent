@@ -1,8 +1,17 @@
+export interface QuestionField {
+  id: string;
+  label: string;
+  type: "text" | "textarea" | "select" | "radio" | "checkbox";
+  options?: string[];
+  placeholder?: string;
+  required?: boolean;
+}
+
 export type MessagePart =
   | { type: "text"; content: string; streaming?: boolean }
   | { type: "thinking"; content: string }
   | { type: "tool_call"; name: string; summary: string; streaming?: boolean; result?: string; error?: string }
-  | { type: "question"; content: string; choices?: string[] }
+  | { type: "question"; content: string; choices?: string[]; default?: string; fields?: QuestionField[]; allowCustomInput?: boolean }
   | { type: "error"; content: string }
   | { type: "warning"; content: string }
   | { type: "image"; path: string; caption?: string }
@@ -19,6 +28,9 @@ export interface Message {
 export interface PendingInput {
   question: string;
   choices?: string[];
+  default?: string;
+  fields?: QuestionField[];
+  allowCustomInput?: boolean;
 }
 
 export interface SessionConfig {
@@ -29,12 +41,27 @@ export interface SessionConfig {
   enableLogging: boolean;
   logDir: string;
   workspacePath?: string;
+  // Advanced model options (matching Streamlit app)
+  enableReasoning: boolean;
+  enablePromptCaching: boolean;
+  promptCacheTtl: string;
+  autoCompactAfterTokens: number;
+  temperature: number;
+  topP: number;
+  frequencyPenalty: number;
+  presencePenalty: number;
+  seed: string;
+  maxOutputTokens: number;
+  openrouterExtraBody: string;
 }
 
 export interface TokenUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  turnPromptTokens?: number;
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
   contextTokensEst?: number;
   compactionThreshold?: number;
 }
@@ -69,6 +96,20 @@ export interface ChatSession {
   createdAt: string;
   lastMessageAt: string;
   messageCount: number;
+  workspacePath?: string;
+}
+
+export interface PersistedSessionState {
+  sessionId: string;
+  workspacePath: string;
+  name: string;
+  createdAt?: string;
+  lastMessageAt?: string;
+  pendingInput: PendingInput | null;
+  tokenUsage: TokenUsage;
+  config: SessionConfig;
+  messageCount: number;
+  messages: Message[];
 }
 
 export interface ModelInfo {
@@ -88,4 +129,15 @@ export const defaultConfig: SessionConfig = {
   enableContextCompaction: true,
   enableLogging: true,
   logDir: "data/eval/jsonl_logs",
+  enableReasoning: true,
+  enablePromptCaching: true,
+  promptCacheTtl: "default",
+  autoCompactAfterTokens: 100000,
+  temperature: 0.2,
+  topP: 1.0,
+  frequencyPenalty: 0.0,
+  presencePenalty: 0.0,
+  seed: "",
+  maxOutputTokens: 50000,
+  openrouterExtraBody: "",
 };

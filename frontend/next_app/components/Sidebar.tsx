@@ -290,18 +290,17 @@ export default function Sidebar({
             style={{ cursor: "pointer" }}
           />
           <span style={{ color: "var(--text-secondary)", fontSize: "11.5px" }}>
-            save conversation log (.jsonl)
+            persist chat history to Convex
           </span>
         </div>
 
         {config.enableLogging && (
-          <Field label="log directory">
+          <Field label="backend requirement">
             <input
               type="text"
-              value={config.logDir}
-              onChange={(e) => setConfig({ ...config, logDir: e.target.value })}
-              placeholder="data/eval/jsonl_logs"
-              style={inputStyle()}
+              value="CONVEX_URL"
+              readOnly
+              style={{ ...inputStyle(), color: "var(--text-dim)" }}
             />
           </Field>
         )}

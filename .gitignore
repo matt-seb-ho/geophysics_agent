@@ -230,3 +230,6 @@ data/outputs/*
 
 # data folder
 /data/
+
+.env
+.env.local

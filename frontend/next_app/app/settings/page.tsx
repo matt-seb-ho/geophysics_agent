@@ -1,18 +1,10 @@
 "use client";
-import { useState } from "react";
-import * as Dialog from "@radix-ui/react-dialog";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import * as Select from "@radix-ui/react-select";
-import { ChevronDown, ChevronRight, X } from "lucide-react";
-import { AVAILABLE_MODELS, SessionConfig } from "../lib/types";
-
-interface Props {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  config: SessionConfig;
-  setConfig: (c: SessionConfig) => void;
-  workspacePath: string;
-  onWorkspaceChange: (path: string) => void;
-}
+import { ChevronDown, ChevronRight, ArrowLeft, Check } from "lucide-react";
+import { AVAILABLE_MODELS, SessionConfig, defaultConfig } from "../../lib/types";
+import { loadConfig, saveConfig, loadWorkspace, saveWorkspace } from "../../lib/config";
 
 function SectionLabel({ label }: { label: string }) {
   return (
@@ -20,10 +12,12 @@ function SectionLabel({ label }: { label: string }) {
       style={{
         color: "var(--text-dim)",
         fontSize: "9.5px",
-        letterSpacing: "0.1em",
+        letterSpacing: "0.12em",
         textTransform: "uppercase",
-        marginBottom: 6,
-        marginTop: 14,
+        marginBottom: 8,
+        marginTop: 20,
+        borderBottom: "1px solid var(--border-subtle)",
+        paddingBottom: 6,
       }}
     >
       {label}
@@ -31,10 +25,20 @@ function SectionLabel({ label }: { label: string }) {
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ color: "var(--text-secondary)", fontSize: "11px", marginBottom: 4 }}>
+    <div style={{ marginBottom: 12 }}>
+      <div
+        style={{ color: "var(--text-secondary)", fontSize: "11px", marginBottom: 4 }}
+      >
         {label}
       </div>
       {children}
@@ -50,11 +54,11 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 function inputStyle(): React.CSSProperties {
   return {
     width: "100%",
-    padding: "5px 8px",
+    padding: "6px 8px",
     background: "var(--bg-elevated)",
     border: "1px solid var(--border-mid)",
     color: "var(--text-primary)",
-    fontSize: "11.5px",
+    fontSize: "12px",
     fontFamily: "var(--font-mono)",
     borderRadius: 2,
     outline: "none",
@@ -73,21 +77,23 @@ function Checkbox({
   onChange: () => void;
 }) {
   return (
-    <div style={{ marginBottom: 8 }}>
+    <div style={{ marginBottom: 10 }}>
       <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 7,
-          cursor: "pointer",
-        }}
+        style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}
         onClick={onChange}
       >
         <input type="checkbox" checked={checked} readOnly style={{ cursor: "pointer" }} />
         <span style={{ color: "var(--text-secondary)", fontSize: "11.5px" }}>{label}</span>
       </div>
       {hint && (
-        <div style={{ color: "var(--text-dim)", fontSize: "10px", marginTop: 2, paddingLeft: 19 }}>
+        <div
+          style={{
+            color: "var(--text-dim)",
+            fontSize: "10px",
+            marginTop: 2,
+            paddingLeft: 19,
+          }}
+        >
           {hint}
         </div>
       )}
@@ -95,71 +101,144 @@ function Checkbox({
   );
 }
 
-export default function SettingsModal({
-  open,
-  onOpenChange,
-  config,
-  setConfig,
-  workspacePath,
-  onWorkspaceChange,
-}: Props) {
+export default function SettingsPage() {
+  const [config, setConfig] = useState<SessionConfig>(defaultConfig);
+  const [workspacePath, setWorkspacePath] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setConfig(loadConfig());
+    setWorkspacePath(loadWorkspace());
+  }, []);
+
+  const updateConfig = (c: SessionConfig) => {
+    setConfig(c);
+    saveConfig(c);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1200);
+  };
+
+  const updateWorkspace = (path: string) => {
+    setWorkspacePath(path);
+    saveWorkspace(path);
+  };
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="radix-dialog-overlay" />
-        <Dialog.Content
-          className="radix-dialog-content"
+    <div
+      style={{
+        display: "flex",
+        height: "100vh",
+        overflow: "hidden",
+        background: "var(--bg-base)",
+        fontFamily: "var(--font-mono)",
+      }}
+    >
+      {/* Left sidebar */}
+      <div
+        style={{
+          width: "var(--sidebar-w)",
+          flexShrink: 0,
+          background: "var(--bg-panel)",
+          borderRight: "1px solid var(--border-subtle)",
+          display: "flex",
+          flexDirection: "column",
+          height: "100%",
+        }}
+      >
+        <div
           style={{
-            background: "var(--bg-panel)",
-            border: "1px solid var(--border-mid)",
-            borderRadius: 4,
-            width: 420,
-            padding: "16px 20px 20px",
-            fontFamily: "var(--font-mono)",
+            padding: "0 12px",
+            height: "var(--header-h)",
+            display: "flex",
+            alignItems: "center",
+            borderBottom: "1px solid var(--border-subtle)",
+            gap: 8,
           }}
         >
-          <div
+          <span style={{ color: "var(--accent)", fontSize: "13px", fontWeight: 600 }}>
+            GEOS
+          </span>
+          <span style={{ color: "var(--text-dim)", fontSize: "11px" }}>settings</span>
+        </div>
+        <div style={{ flex: 1 }} />
+        <div
+          style={{
+            padding: "10px 12px",
+            borderTop: "1px solid var(--border-subtle)",
+          }}
+        >
+          <Link
+            href="/"
             style={{
               display: "flex",
-              justifyContent: "space-between",
               alignItems: "center",
-              marginBottom: 4,
+              gap: 6,
+              color: "var(--text-secondary)",
+              fontSize: "11px",
+              textDecoration: "none",
+              padding: "6px 0",
             }}
           >
-            <Dialog.Title
+            <ArrowLeft size={12} />
+            back to chat
+          </Link>
+        </div>
+      </div>
+
+      {/* Settings content */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "28px 40px" }}>
+        {/* Header */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            marginBottom: 4,
+          }}
+        >
+          <h1
+            style={{
+              color: "var(--text-bright)",
+              fontSize: "13px",
+              fontWeight: 600,
+              letterSpacing: "0.05em",
+            }}
+          >
+            Settings
+          </h1>
+          {saved && (
+            <span
               style={{
-                color: "var(--text-bright)",
-                fontSize: "12px",
-                fontWeight: 600,
-                letterSpacing: "0.06em",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                color: "var(--success)",
+                fontSize: "10.5px",
               }}
             >
-              Settings
-            </Dialog.Title>
-            <Dialog.Close asChild>
-              <button
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--text-dim)",
-                  display: "flex",
-                  alignItems: "center",
-                }}
-              >
-                <X size={14} />
-              </button>
-            </Dialog.Close>
-          </div>
+              <Check size={10} />
+              saved
+            </span>
+          )}
+          <span
+            style={{
+              marginLeft: "auto",
+              color: "var(--text-dim)",
+              fontSize: "10px",
+            }}
+          >
+            changes take effect on next session
+          </span>
+        </div>
 
+        <div style={{ maxWidth: 520 }}>
           {/* MODEL */}
           <SectionLabel label="model" />
           <Field label="provider/model">
             <Select.Root
               value={config.model}
-              onValueChange={(v) => setConfig({ ...config, model: v })}
+              onValueChange={(v) => updateConfig({ ...config, model: v })}
             >
               <Select.Trigger
                 style={{
@@ -197,13 +276,13 @@ export default function SettingsModal({
             <input
               type="text"
               value={config.provider}
-              onChange={(e) => setConfig({ ...config, provider: e.target.value })}
+              onChange={(e) => updateConfig({ ...config, provider: e.target.value })}
               placeholder="e.g. baseten, novita, together"
               style={inputStyle()}
             />
           </Field>
 
-          {/* Advanced model options (collapsible) */}
+          {/* Advanced model options */}
           <button
             onClick={() => setAdvancedOpen((v) => !v)}
             style={{
@@ -227,29 +306,34 @@ export default function SettingsModal({
           {advancedOpen && (
             <div
               style={{
-                padding: "8px 0 4px 8px",
+                padding: "8px 0 4px 12px",
                 borderLeft: "2px solid var(--border-mid)",
-                marginBottom: 8,
+                marginBottom: 12,
               }}
             >
               <Checkbox
                 checked={config.enableReasoning}
                 label="Enable reasoning"
                 hint="Request reasoning tokens for models that support them"
-                onChange={() => setConfig({ ...config, enableReasoning: !config.enableReasoning })}
+                onChange={() =>
+                  updateConfig({ ...config, enableReasoning: !config.enableReasoning })
+                }
               />
-
               <Checkbox
                 checked={config.enablePromptCaching}
                 label="Enable prompt caching"
                 hint="Use provider prompt caching where available"
-                onChange={() => setConfig({ ...config, enablePromptCaching: !config.enablePromptCaching })}
+                onChange={() =>
+                  updateConfig({
+                    ...config,
+                    enablePromptCaching: !config.enablePromptCaching,
+                  })
+                }
               />
-
               <Field label="prompt cache TTL" hint="Anthropic cache TTL override">
                 <Select.Root
                   value={config.promptCacheTtl}
-                  onValueChange={(v) => setConfig({ ...config, promptCacheTtl: v })}
+                  onValueChange={(v) => updateConfig({ ...config, promptCacheTtl: v })}
                 >
                   <Select.Trigger
                     style={{
@@ -266,7 +350,11 @@ export default function SettingsModal({
                     </Select.Icon>
                   </Select.Trigger>
                   <Select.Portal>
-                    <Select.Content className="radix-select-content" position="popper" sideOffset={4}>
+                    <Select.Content
+                      className="radix-select-content"
+                      position="popper"
+                      sideOffset={4}
+                    >
                       <Select.Viewport>
                         <Select.Item value="default" className="radix-select-item">
                           <Select.ItemText>default</Select.ItemText>
@@ -280,14 +368,22 @@ export default function SettingsModal({
                 </Select.Root>
               </Field>
 
-              <Field label={`auto-compact after tokens: ${config.autoCompactAfterTokens.toLocaleString()}`} hint="0 to disable">
+              <Field
+                label={`auto-compact after tokens: ${config.autoCompactAfterTokens.toLocaleString()}`}
+                hint="0 to disable"
+              >
                 <input
                   type="number"
                   min={0}
                   max={2000000}
                   step={10000}
                   value={config.autoCompactAfterTokens}
-                  onChange={(e) => setConfig({ ...config, autoCompactAfterTokens: parseInt(e.target.value) || 0 })}
+                  onChange={(e) =>
+                    updateConfig({
+                      ...config,
+                      autoCompactAfterTokens: parseInt(e.target.value) || 0,
+                    })
+                  }
                   style={inputStyle()}
                 />
               </Field>
@@ -299,7 +395,9 @@ export default function SettingsModal({
                   max={2}
                   step={0.05}
                   value={config.temperature}
-                  onChange={(e) => setConfig({ ...config, temperature: parseFloat(e.target.value) })}
+                  onChange={(e) =>
+                    updateConfig({ ...config, temperature: parseFloat(e.target.value) })
+                  }
                   style={{ width: "100%" }}
                 />
               </Field>
@@ -311,7 +409,9 @@ export default function SettingsModal({
                   max={1}
                   step={0.05}
                   value={config.topP}
-                  onChange={(e) => setConfig({ ...config, topP: parseFloat(e.target.value) })}
+                  onChange={(e) =>
+                    updateConfig({ ...config, topP: parseFloat(e.target.value) })
+                  }
                   style={{ width: "100%" }}
                 />
               </Field>
@@ -323,7 +423,12 @@ export default function SettingsModal({
                   max={2}
                   step={0.1}
                   value={config.frequencyPenalty}
-                  onChange={(e) => setConfig({ ...config, frequencyPenalty: parseFloat(e.target.value) })}
+                  onChange={(e) =>
+                    updateConfig({
+                      ...config,
+                      frequencyPenalty: parseFloat(e.target.value),
+                    })
+                  }
                   style={{ width: "100%" }}
                 />
               </Field>
@@ -335,7 +440,12 @@ export default function SettingsModal({
                   max={2}
                   step={0.1}
                   value={config.presencePenalty}
-                  onChange={(e) => setConfig({ ...config, presencePenalty: parseFloat(e.target.value) })}
+                  onChange={(e) =>
+                    updateConfig({
+                      ...config,
+                      presencePenalty: parseFloat(e.target.value),
+                    })
+                  }
                   style={{ width: "100%" }}
                 />
               </Field>
@@ -344,28 +454,40 @@ export default function SettingsModal({
                 <input
                   type="text"
                   value={config.seed}
-                  onChange={(e) => setConfig({ ...config, seed: e.target.value })}
+                  onChange={(e) => updateConfig({ ...config, seed: e.target.value })}
                   placeholder="optional integer"
                   style={inputStyle()}
                 />
               </Field>
 
-              <Field label={`max output tokens: ${config.maxOutputTokens.toLocaleString()}`}>
+              <Field
+                label={`max output tokens: ${config.maxOutputTokens.toLocaleString()}`}
+              >
                 <input
                   type="number"
                   min={1}
                   max={200000}
                   step={1000}
                   value={config.maxOutputTokens}
-                  onChange={(e) => setConfig({ ...config, maxOutputTokens: parseInt(e.target.value) || 50000 })}
+                  onChange={(e) =>
+                    updateConfig({
+                      ...config,
+                      maxOutputTokens: parseInt(e.target.value) || 50000,
+                    })
+                  }
                   style={inputStyle()}
                 />
               </Field>
 
-              <Field label="extra OpenRouter JSON" hint="Merged into OpenRouter request body">
+              <Field
+                label="extra OpenRouter JSON"
+                hint="Merged into OpenRouter request body"
+              >
                 <textarea
                   value={config.openrouterExtraBody}
-                  onChange={(e) => setConfig({ ...config, openrouterExtraBody: e.target.value })}
+                  onChange={(e) =>
+                    updateConfig({ ...config, openrouterExtraBody: e.target.value })
+                  }
                   placeholder='{"provider":{"allow_fallbacks":false}}'
                   rows={3}
                   style={{
@@ -389,17 +511,16 @@ export default function SettingsModal({
               step={5}
               value={config.maxSteps}
               onChange={(e) =>
-                setConfig({ ...config, maxSteps: parseInt(e.target.value) })
+                updateConfig({ ...config, maxSteps: parseInt(e.target.value) })
               }
               style={{ width: "100%", marginTop: 4 }}
             />
           </Field>
-
           <Checkbox
             checked={config.enableContextCompaction}
             label="Context compaction"
             onChange={() =>
-              setConfig({
+              updateConfig({
                 ...config,
                 enableContextCompaction: !config.enableContextCompaction,
               })
@@ -408,11 +529,11 @@ export default function SettingsModal({
 
           {/* WORKSPACE */}
           <SectionLabel label="workspace" />
-          <Field label="directory" hint="Agent reads/writes here">
+          <Field label="directory" hint="Agent reads/writes here (takes effect on next session)">
             <input
               type="text"
               value={workspacePath}
-              onChange={(e) => onWorkspaceChange(e.target.value)}
+              onChange={(e) => updateWorkspace(e.target.value)}
               placeholder="auto (temp dir)"
               style={inputStyle()}
             />
@@ -425,10 +546,9 @@ export default function SettingsModal({
             label="Persist chat history to Convex"
             hint="Stores workspace path, messages, pending prompts, and token counts in Convex when the backend has CONVEX_URL set"
             onChange={() =>
-              setConfig({ ...config, enableLogging: !config.enableLogging })
+              updateConfig({ ...config, enableLogging: !config.enableLogging })
             }
           />
-
           {config.enableLogging && (
             <Field label="backend requirement" hint="Configure CONVEX_URL in the FastAPI environment for persistence to be active">
               <input
@@ -439,8 +559,10 @@ export default function SettingsModal({
               />
             </Field>
           )}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+
+          <div style={{ height: 48 }} />
+        </div>
+      </div>
+    </div>
   );
 }
