@@ -12,7 +12,7 @@ def main():
     procs = []
 
     api_proc = subprocess.Popen(
-        ["uvicorn", "frontend.api_server:app", "--port", "8000"],
+        ["uvicorn", "frontend.api_server:app", "--port", "6305"],
         cwd=str(project_root),
     )
     procs.append(api_proc)

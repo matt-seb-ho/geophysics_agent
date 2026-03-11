@@ -11,6 +11,8 @@ interface Props {
   onSend: (text: string) => void;
   onToggleFileTree: () => void;
   showFileTree: boolean;
+  onToggleSidebar?: () => void;
+  showSidebar?: boolean;
 }
 
 const WELCOME = `GEOS Multiphysics Simulation Agent
@@ -33,6 +35,8 @@ export default function ChatArea({
   onSend,
   onToggleFileTree,
   showFileTree,
+  onToggleSidebar,
+  showSidebar,
 }: Props) {
   const [inputText, setInputText] = useState("");
   const bottomRef   = useRef<HTMLDivElement>(null);
@@ -71,6 +75,12 @@ export default function ChatArea({
     ? "agent is responding…"
     : "describe your simulation… (Enter to send, Shift+Enter for newline)";
 
+  // Suppress unused variable warnings for props kept for parent compatibility
+  void onToggleFileTree;
+  void showFileTree;
+  void onToggleSidebar;
+  void showSidebar;
+
   return (
     <div
       style={{
@@ -82,88 +92,6 @@ export default function ChatArea({
         background: "var(--bg-base)",
       }}
     >
-      {/* ── Top bar ── */}
-      <div
-        style={{
-          height: "var(--header-h)",
-          borderBottom: "1px solid var(--border-subtle)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "0 14px",
-          flexShrink: 0,
-          background: "var(--bg-panel)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span
-            style={{ color: "var(--text-dim)", fontSize: "10px", letterSpacing: "0.06em" }}
-          >
-            GEOS AGENT
-          </span>
-          {isStreaming && (
-            <span
-              style={{
-                background: "var(--accent-bg)",
-                border: "1px solid var(--accent-border)",
-                color: "var(--accent)",
-                fontSize: "9.5px",
-                padding: "1px 7px",
-                borderRadius: 2,
-                letterSpacing: "0.05em",
-              }}
-            >
-              <span className="spinning" style={{ display: "inline-block", marginRight: 4 }}>
-                ↻
-              </span>
-              running
-            </span>
-          )}
-          {pendingInput && !isStreaming && (
-            <span
-              style={{
-                background: "var(--info-bg)",
-                border: "1px solid var(--info)",
-                color: "var(--info)",
-                fontSize: "9.5px",
-                padding: "1px 7px",
-                borderRadius: 2,
-                letterSpacing: "0.05em",
-              }}
-            >
-              awaiting input
-            </span>
-          )}
-        </div>
-
-        {/* File tree toggle */}
-        <button
-          onClick={onToggleFileTree}
-          title="Toggle workspace file tree"
-          style={{
-            background: showFileTree ? "var(--accent-bg)" : "transparent",
-            border: `1px solid ${showFileTree ? "var(--accent-border)" : "var(--border-mid)"}`,
-            color: showFileTree ? "var(--accent)" : "var(--text-dim)",
-            fontSize: "11px",
-            padding: "2px 9px",
-            borderRadius: 2,
-            cursor: "pointer",
-            fontFamily: "var(--font-mono)",
-            transition: "all 0.15s",
-          }}
-          onMouseEnter={(e) => {
-            if (!showFileTree)
-              (e.currentTarget as HTMLElement).style.color = "var(--accent)";
-          }}
-          onMouseLeave={(e) => {
-            if (!showFileTree)
-              (e.currentTarget as HTMLElement).style.color = "var(--text-dim)";
-          }}
-        >
-          {showFileTree ? "✕ files" : "⊞ files"}
-        </button>
-      </div>
-
       {/* ── Message list ── */}
       <div
         style={{
@@ -176,7 +104,7 @@ export default function ChatArea({
           <pre
             style={{
               color: "var(--text-dim)",
-              fontSize: "12px",
+              fontSize: "13.5px",
               lineHeight: 1.7,
               background: "transparent",
               border: "none",
@@ -194,59 +122,13 @@ export default function ChatArea({
               message={msg}
               sessionId={sessionId ?? undefined}
               isLast={i === messages.length - 1}
+              canAnswerQuestion={!!pendingInput && i === messages.length - 1 && msg.role === "assistant"}
+              onAnswerQuestion={onSend}
             />
           ))
         )}
         <div ref={bottomRef} />
       </div>
-
-      {/* ── Pending question reminder ── */}
-      {pendingInput && (
-        <div
-          style={{
-            margin: "0 20px",
-            marginBottom: 6,
-            background: "var(--info-bg)",
-            border: "1px solid var(--info)",
-            borderRadius: 2,
-            padding: "6px 10px",
-            fontSize: "11.5px",
-          }}
-        >
-          <span style={{ color: "var(--info)", marginRight: 6 }}>[?]</span>
-          <span style={{ color: "var(--text-primary)" }}>{pendingInput.question}</span>
-          {pendingInput.choices && pendingInput.choices.length > 0 && (
-            <div style={{ marginTop: 4, display: "flex", gap: 5, flexWrap: "wrap" }}>
-              {pendingInput.choices.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => { setInputText(c); textareaRef.current?.focus(); }}
-                  style={{
-                    background: "var(--bg-elevated)",
-                    border: "1px solid var(--border-mid)",
-                    borderRadius: 2,
-                    padding: "1px 8px",
-                    color: "var(--text-secondary)",
-                    fontSize: "11px",
-                    cursor: "pointer",
-                    fontFamily: "var(--font-mono)",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLElement).style.borderColor = "var(--accent)";
-                    (e.currentTarget as HTMLElement).style.color = "var(--accent)";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.borderColor = "var(--border-mid)";
-                    (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)";
-                  }}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* ── Input area ── */}
       <div
@@ -264,19 +146,6 @@ export default function ChatArea({
             alignItems: "flex-end",
           }}
         >
-          {/* Prompt glyph */}
-          <div
-            style={{
-              color: pendingInput ? "var(--info)" : "var(--accent)",
-              fontSize: "14px",
-              paddingBottom: 9,
-              flexShrink: 0,
-              userSelect: "none",
-            }}
-          >
-            {pendingInput ? "?" : "»"}
-          </div>
-
           <textarea
             ref={textareaRef}
             value={inputText}
@@ -292,12 +161,12 @@ export default function ChatArea({
               background: "var(--bg-surface)",
               border: `1px solid ${isStreaming ? "var(--border-subtle)" : "var(--border-mid)"}`,
               color: isStreaming ? "var(--text-dim)" : "var(--text-primary)",
-              fontSize: "12.5px",
+              fontSize: "14px",
               fontFamily: "var(--font-mono)",
               borderRadius: 2,
               outline: "none",
               lineHeight: 1.5,
-              minHeight: 38,
+              minHeight: 44,
               maxHeight: 160,
               overflowY: "auto",
               transition: "border-color 0.15s",
@@ -323,8 +192,8 @@ export default function ChatArea({
               color:
                 isStreaming || !inputText.trim()
                   ? "var(--text-dim)"
-                  : "#000",
-              fontSize: "12px",
+                  : "var(--accent-contrast)",
+              fontSize: "13px",
               fontFamily: "var(--font-mono)",
               fontWeight: 600,
               borderRadius: 2,
@@ -336,25 +205,13 @@ export default function ChatArea({
             }}
           >
             {isStreaming ? (
-              <span className="spinning" style={{ display: "inline-block" }}>
-                ↻
-              </span>
+              <span className="spinner" />
             ) : (
               "run"
             )}
           </button>
         </div>
 
-        <div
-          style={{
-            marginTop: 5,
-            color: "var(--text-dim)",
-            fontSize: "9.5px",
-            letterSpacing: "0.03em",
-          }}
-        >
-          Enter to send · Shift+Enter for newline · Shift+Enter also sends multi-line
-        </div>
       </div>
     </div>
   );

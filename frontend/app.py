@@ -830,6 +830,8 @@ if prompt := st.chat_input(_chat_placeholder):
                 "question": e.question,
                 "choices": e.choices,
                 "default": e.default,
+                "fields": getattr(e, "fields", None),
+                "allow_custom_input": getattr(e, "allow_custom_input", None),
             }
             # Show the question in the assistant's response
             container.info(f"\u2753 **Question:** {e.question}")
@@ -842,6 +844,9 @@ if prompt := st.chat_input(_chat_placeholder):
                     "type": "question",
                     "content": e.question,
                     "choices": e.choices,
+                    "default": e.default,
+                    "fields": getattr(e, "fields", None),
+                    "allowCustomInput": getattr(e, "allow_custom_input", None),
                 }
             )
 

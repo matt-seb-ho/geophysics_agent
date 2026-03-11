@@ -4,9 +4,66 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Design tokens ─────────────────────────────────────────────────────── */
+/* ─── Design tokens (light — default) ──────────────────────────────────── */
 :root {
   /* Background layers */
+  --bg-base:     #f5f5f5;
+  --bg-panel:    #ebebeb;
+  --bg-surface:  #ffffff;
+  --bg-elevated: #e2e2e2;
+  --bg-hover:    #d8d8d8;
+  --bg-active:   #d0d0d0;
+
+  /* Borders */
+  --border-faint:  #e8e8e8;
+  --border-subtle: #dcdcdc;
+  --border-mid:    #c8c8c8;
+  --border-strong: #b0b0b0;
+
+  /* Text */
+  --text-primary:   #1f1f1f;
+  --text-secondary: #3f3f3f;
+  --text-dim:       #646464;
+  --text-bright:    #111111;
+  --text-code:      #2563eb;
+
+  /* MATLAB orange accent */
+  --accent:          #d06800;
+  --accent-bright:   #e07810;
+  --accent-contrast: #fffaf3;
+  --accent-dim:      rgba(208, 104, 0, 0.15);
+  --accent-bg:       rgba(208, 104, 0, 0.07);
+  --accent-border:   rgba(208, 104, 0, 0.3);
+
+  /* Semantic */
+  --success:     #3a7a4c;
+  --success-bg:  rgba(58, 122, 76, 0.1);
+  --error:       #c03030;
+  --error-bg:    rgba(192, 48, 48, 0.08);
+  --warning:     #b07000;
+  --warning-bg:  rgba(176, 112, 0, 0.08);
+  --info:        #2a62b4;
+  --info-bg:     rgba(42, 98, 180, 0.08);
+
+  /* Tool blocks */
+  --tool-bg:        rgba(42, 98, 180, 0.06);
+  --tool-border:    rgba(42, 98, 180, 0.18);
+  --tool-text:      #2a62b4;
+  --thinking-bg:    rgba(0, 0, 0, 0.03);
+  --thinking-border:#d0d0d0;
+
+  /* Layout */
+  --sidebar-w:  272px;
+  --filetree-w: 272px;
+  --header-h:   40px;
+
+  /* Typography */
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 14px;
+}
+
+/* ─── Dark theme ───────────────────────────────────────────────────────── */
+[data-theme="dark"] {
   --bg-base:     #0c0c0c;
   --bg-panel:    #111111;
   --bg-surface:  #171717;
@@ -14,27 +71,24 @@
   --bg-hover:    #222222;
   --bg-active:   #292929;
 
-  /* Borders */
   --border-faint:  #161616;
   --border-subtle: #1f1f1f;
   --border-mid:    #282828;
   --border-strong: #353535;
 
-  /* Text */
-  --text-primary:   #c0c0c0;
-  --text-secondary: #666666;
-  --text-dim:       #404040;
-  --text-bright:    #e4e4e4;
+  --text-primary:   #e2e2e2;
+  --text-secondary: #c4c4c4;
+  --text-dim:       #a0a0a0;
+  --text-bright:    #f4f4f4;
   --text-code:      #93c5fd;
 
-  /* MATLAB orange accent */
   --accent:          #e07810;
   --accent-bright:   #f7a244;
+  --accent-contrast: #140a00;
   --accent-dim:      rgba(224, 120, 16, 0.25);
   --accent-bg:       rgba(224, 120, 16, 0.06);
   --accent-border:   rgba(224, 120, 16, 0.3);
 
-  /* Semantic */
   --success:     #4d8a5f;
   --success-bg:  rgba(77, 138, 95, 0.1);
   --error:       #bf3b30;
@@ -44,21 +98,11 @@
   --info:        #3a72c4;
   --info-bg:     rgba(58, 114, 196, 0.1);
 
-  /* Tool blocks */
   --tool-bg:        rgba(24, 38, 60, 0.4);
   --tool-border:    #1e3050;
   --tool-text:      #7db9e8;
   --thinking-bg:    rgba(18, 18, 18, 0.9);
-  --thinking-border:#202020;
-
-  /* Layout */
-  --sidebar-w:  252px;
-  --filetree-w: 252px;
-  --header-h:   36px;
-
-  /* Typography */
-  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
-  font-size: 12.5px;
+  --thinking-border:#2a2a2a;
 }
 
 /* ─── Reset ─────────────────────────────────────────────────────────────── */
@@ -73,7 +117,7 @@ body {
   background: var(--bg-base);
   color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 14px;
   line-height: 1.65;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -91,7 +135,7 @@ body {
 /* ─── Code ───────────────────────────────────────────────────────────────── */
 code {
   font-family: var(--font-mono);
-  font-size: 0.88em;
+  font-size: 0.92em;
   background: var(--bg-elevated);
   padding: 1px 5px;
   border-radius: 2px;
@@ -103,7 +147,7 @@ pre {
   border-radius: 3px;
   padding: 8px 10px;
   overflow-x: auto;
-  font-size: 0.85em;
+  font-size: 0.92em;
   color: var(--text-primary);
 }
 pre code { background: transparent; padding: 0; color: inherit; }
@@ -136,16 +180,28 @@ pre code { background: transparent; padding: 0; color: inherit; }
 .spinning { animation: spin 0.8s linear infinite; }
 .pulse-border { animation: pulse-border 2s ease-in-out infinite; }
 
+.spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.65s linear infinite;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
 /* ─── Markdown content ───────────────────────────────────────────────────── */
 .md p                { margin-bottom: 0.45em; }
 .md p:last-child     { margin-bottom: 0; }
 .md ul, .md ol       { padding-left: 1.3em; margin-bottom: 0.45em; }
 .md li               { margin-bottom: 0.15em; }
-.md h1               { font-size: 1.1em; font-weight: 600; color: var(--text-bright); margin: 0.9em 0 0.4em; }
-.md h2               { font-size: 1.05em; font-weight: 600; color: var(--text-bright); margin: 0.8em 0 0.35em; }
-.md h3               { font-size: 1em; font-weight: 500; color: var(--text-bright); margin: 0.7em 0 0.3em; }
+.md h1               { font-size: 1.24em; font-weight: 600; color: var(--text-bright); margin: 0.9em 0 0.4em; }
+.md h2               { font-size: 1.14em; font-weight: 600; color: var(--text-bright); margin: 0.8em 0 0.35em; }
+.md h3               { font-size: 1.04em; font-weight: 500; color: var(--text-bright); margin: 0.7em 0 0.3em; }
 .md blockquote       { border-left: 2px solid var(--accent); padding-left: 0.8em; color: var(--text-secondary); margin: 0.5em 0; }
-.md table            { border-collapse: collapse; width: 100%; margin: 0.5em 0; font-size: 0.88em; }
+.md table            { border-collapse: collapse; width: 100%; margin: 0.5em 0; font-size: 0.92em; }
 .md th, .md td       { border: 1px solid var(--border-mid); padding: 3px 8px; text-align: left; }
 .md th               { background: var(--bg-elevated); color: var(--text-bright); }
 .md hr               { border: none; border-top: 1px solid var(--border-mid); margin: 0.8em 0; }
@@ -160,7 +216,7 @@ input[type="range"],
 select,
 textarea {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13.5px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-mid);
   color: var(--text-primary);
@@ -208,4 +264,55 @@ input[type="checkbox"] {
   border: none;
   border-top: 1px solid var(--border-subtle);
   margin: 8px 0;
+}
+
+/* ─── KaTeX ──────────────────────────────────────────────────────────────── */
+.katex { font-size: 1.05em; }
+.md .katex-display {
+  margin: 0.7em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.15em;
+}
+
+/* ─── Radix Dialog overlay ───────────────────────────────────────────────── */
+.radix-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+}
+.radix-dialog-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 101;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+/* ─── Radix Select ───────────────────────────────────────────────────────── */
+.radix-select-content {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-mid);
+  border-radius: 3px;
+  padding: 3px;
+  max-height: 280px;
+  overflow-y: auto;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+.radix-select-item {
+  padding: 4px 8px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  border-radius: 2px;
+  cursor: pointer;
+  outline: none;
+}
+.radix-select-item[data-highlighted] {
+  background: var(--accent-bg);
+  color: var(--accent);
 }

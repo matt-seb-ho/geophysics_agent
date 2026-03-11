@@ -15,6 +15,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!frontend/next_app/lib/
 lib64/
 parts/
 sdist/
@@ -229,3 +230,6 @@ data/outputs/*
 
 # data folder
 /data/
+
+.env
+.env.local

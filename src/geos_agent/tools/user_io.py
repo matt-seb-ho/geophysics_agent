@@ -1,4 +1,5 @@
 # geos_agent/tools/user_io.py
+import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -18,10 +19,14 @@ class UserInputRequired(Exception):
         question: str,
         choices: Optional[List[str]] = None,
         default: Optional[str] = None,
+        fields: Optional[List[Dict[str, Any]]] = None,
+        allow_custom_input: bool = False,
     ):
         self.question = question
         self.choices = choices
         self.default = default
+        self.fields = fields
+        self.allow_custom_input = allow_custom_input
         # Filled in by GeosAgent._run_tool_call when it catches this
         self.tool_name: str = ""
         self.tool_call_id: str = ""
@@ -31,7 +36,7 @@ class UserInputRequired(Exception):
 @dataclass
 class AskUser(Tool):
     name: str = "ask_user"
-    description: str = "Ask the human a clarifying question and return their response."
+    description: str = "Ask the human a clarifying question and return their response. Supports simple choices or structured form fields."
     blocking: bool = True  # False = raise UserInputRequired instead of input()
 
     def get_spec(self) -> Dict[str, Any]:
@@ -43,9 +48,44 @@ class AskUser(Tool):
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "question": {"type": "string"},
-                        "choices": {"type": "array", "items": {"type": "string"}},
-                        "default": {"type": "string"},
+                        "question": {
+                            "type": "string",
+                            "description": "The prompt shown to the user.",
+                        },
+                        "choices": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional quick-pick button choices.",
+                        },
+                        "default": {
+                            "type": "string",
+                            "description": "Optional default response.",
+                        },
+                        "allow_custom_input": {"type": "boolean", "default": False},
+                        "fields": {
+                            "type": "array",
+                            "description": "Optional structured form controls to render inline. Use this for dropdowns, radios, checkboxes, text inputs, or textareas.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string", "description": "Stable field identifier."},
+                                    "label": {"type": "string", "description": "User-facing field label."},
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["text", "textarea", "select", "radio", "checkbox"],
+                                        "description": "Control type to render.",
+                                    },
+                                    "options": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "Allowed options for select, radio, or checkbox fields.",
+                                    },
+                                    "placeholder": {"type": "string", "description": "Optional placeholder text."},
+                                    "required": {"type": "boolean", "default": False},
+                                },
+                                "required": ["id", "label", "type"],
+                            },
+                        },
                         "multiline": {"type": "boolean", "default": False},
                         "end_marker": {"type": "string", "default": "EOF"},
                     },
@@ -63,21 +103,89 @@ class AskUser(Tool):
         question: str,
         choices: Optional[List[str]] = None,
         default: Optional[str] = None,
+        allow_custom_input: bool = False,
+        fields: Optional[List[Dict[str, Any]]] = None,
         multiline: bool = False,
         end_marker: str = "EOF",
     ) -> Dict[str, Any]:
         if not self.blocking:
-            raise UserInputRequired(question=question, choices=choices, default=default)
+            raise UserInputRequired(
+                question=question,
+                choices=choices,
+                default=default,
+                fields=fields,
+                allow_custom_input=allow_custom_input,
+            )
 
         # --- CLI mode (original behaviour) ---
         prompt = question
         if choices:
             prompt += "\nChoices:\n" + "\n".join(f"- {c}" for c in choices)
+        if fields:
+            prompt += "\nForm fields:"
+            for field_def in fields:
+                field_type = field_def.get("type", "text")
+                field_label = field_def.get("label", field_def.get("id", "field"))
+                prompt += f"\n- {field_label} [{field_type}]"
+                options = field_def.get("options") or []
+                if options:
+                    prompt += f" options={', '.join(str(option) for option in options)}"
         if default is not None:
             prompt += f"\nDefault: {default}"
         prompt += "\n> "
 
         print(prompt, flush=True)
+
+        if fields:
+            answers: Dict[str, Any] = {}
+            print(question, flush=True)
+            for field_def in fields:
+                field_id = str(field_def.get("id", "")).strip()
+                label = str(field_def.get("label", field_id or "Field"))
+                field_type = str(field_def.get("type", "text"))
+                options = [str(option) for option in (field_def.get("options") or [])]
+                required = bool(field_def.get("required", False))
+                placeholder = str(field_def.get("placeholder", "") or "")
+
+                while True:
+                    field_prompt = f"{label}"
+                    if options:
+                        field_prompt += f" ({', '.join(options)})"
+                    if placeholder:
+                        field_prompt += f" [{placeholder}]"
+                    if not required:
+                        field_prompt += " [optional]"
+                    field_prompt += "\n> "
+                    print(field_prompt, end="", flush=True)
+
+                    if field_type == "textarea":
+                        print(
+                            f"(Enter multi-line input. End with a line containing only {end_marker})"
+                        )
+                        lines: List[str] = []
+                        while True:
+                            line = input()
+                            if line.strip() == end_marker:
+                                break
+                            lines.append(line)
+                        value: Any = "\n".join(lines).strip()
+                    else:
+                        raw = input().strip()
+                        if field_type == "checkbox":
+                            value = [item.strip() for item in raw.split(",") if item.strip()]
+                        else:
+                            value = raw
+
+                    is_empty = len(value) == 0 if isinstance(value, list) else not str(value).strip()
+                    if is_empty and not required:
+                        answers[field_id] = value
+                        break
+                    if not is_empty:
+                        answers[field_id] = value
+                        break
+                    print("A value is required for this field.", flush=True)
+
+            return {"text": json.dumps(answers), "answers": answers}
 
         if multiline:
             print(
