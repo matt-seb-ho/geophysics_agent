@@ -37,9 +37,10 @@ import subprocess
 DEFAULT_EVAL_PREAMBLE = """\
 You are being evaluated on your ability to author GEOS XML input files from \
 a natural language specification. Use the documentation search tools \
-(search_navigator, search_technical, fetch_code) to learn GEOS XML syntax \
-and patterns, then author the configuration files yourself. If a tool blocks \
-access to a file, move on and rely on documentation search instead.
+(search_navigator, search_technical, search_schema) to learn GEOS XML syntax \
+and patterns, then author the configuration files yourself. You can read files \
+with read_file or grep_search and modify them with write_file or edit_file. \
+If a tool blocks access to a file, move on and rely on documentation search instead.
 
 --- BEGIN SIMULATION SPECIFICATION ---
 """

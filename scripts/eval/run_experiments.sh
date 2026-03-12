@@ -36,9 +36,16 @@ for experiment_dir in "$EXPERIMENTS_DIR"/*; do
         echo "Workspace: $experiment_dir"
         
         export EXCLUDED_EXAMPLE_DIR="$experiment_name"
+
+        # Define eval preamble to prepend to instructions
+        EVAL_PREAMBLE="You are being evaluated on your ability to author GEOS XML input files from a natural language specification. Use the documentation search tools (search_navigator, search_technical, search_schema) to learn GEOS XML syntax and patterns, then author the configuration files yourself. You can read files with read_file or grep_search and modify them with write_file or edit_file. If a tool blocks access to a file, move on and rely on documentation search instead.\n\n--- BEGIN SIMULATION SPECIFICATION ---\n\n"
+        
+        # Read the instructions logic
+        raw_instructions=$(cat "$instructions_file")
+        full_instructions=$(echo -e "${EVAL_PREAMBLE}${raw_instructions}")
         
         # Use command substitution with proper quoting
-        uv run geos-agent --instruction "$(cat "$instructions_file")" --workspace "$experiment_dir" --log "$experiment_dir/log.json"
+        uv run geos-agent --instruction "$full_instructions" --workspace "$experiment_dir" --log "$experiment_dir/log.json"
         
         echo "Completed: $experiment_name"
         echo ""
