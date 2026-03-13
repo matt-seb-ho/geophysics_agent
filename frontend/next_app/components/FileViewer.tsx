@@ -57,8 +57,6 @@ export default function FileViewer({
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
           padding: "0 14px",
           height: "var(--header-h)",
           borderBottom: "1px solid var(--border-subtle)",
@@ -79,16 +77,6 @@ export default function FileViewer({
         >
           {file?.path ?? "No file selected"}
         </div>
-        <span
-          style={{
-            color: "var(--text-secondary)",
-            fontSize: "10px",
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-          }}
-        >
-          preview
-        </span>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: 0 }}>

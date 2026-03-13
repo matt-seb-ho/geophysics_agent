@@ -1,8 +1,18 @@
 "use client";
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 
 interface Props {
   content: string;
+}
+
+const DCP_TRACE_RE = /<dcp-message-id>[\s\S]*?<\/dcp-message-id>\s*/g;
+
+function sanitizeThinkingContent(content: string): string {
+  return content.replace(DCP_TRACE_RE, "").replace(/\n{3,}/g, "\n\n").trimStart();
 }
 
 export default function ThinkingBlock({ content }: Props) {
@@ -24,7 +34,7 @@ export default function ThinkingBlock({ content }: Props) {
           alignItems: "center",
           gap: 6,
           width: "100%",
-          padding: "5px 9px",
+          padding: "5px 10px",
           background: "transparent",
           border: "none",
           cursor: "pointer",
@@ -34,7 +44,16 @@ export default function ThinkingBlock({ content }: Props) {
           textAlign: "left",
         }}
       >
-        <span style={{ fontSize: 9, letterSpacing: 1 }}>
+        <span
+          style={{
+            width: 14,
+            display: "inline-flex",
+            justifyContent: "center",
+            fontSize: 9,
+            letterSpacing: 1,
+            flexShrink: 0,
+          }}
+        >
           {open ? "▼" : "▶"}
         </span>
         <span style={{ color: "var(--text-dim)", letterSpacing: "0.03em" }}>
@@ -50,11 +69,14 @@ export default function ThinkingBlock({ content }: Props) {
             color: "var(--text-dim)",
             fontSize: "12.5px",
             lineHeight: 1.6,
-            whiteSpace: "pre-wrap",
             fontStyle: "italic",
           }}
         >
-          {content}
+          <div className="md">
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+              {sanitizeThinkingContent(content)}
+            </ReactMarkdown>
+          </div>
         </div>
       )}
     </div>

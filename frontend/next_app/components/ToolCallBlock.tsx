@@ -44,27 +44,29 @@ export default function ToolCallBlock({ name, summary, result, error, streaming 
         overflow: "hidden",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px" }}>
         {/* Show/hide toggle on the LEFT (like ThinkingBlock) */}
         {hasOutput && !streaming ? (
           <button
             onClick={() => setResultOpen((v) => !v)}
             style={{
+              width: 14,
+              display: "inline-flex",
+              justifyContent: "center",
+              alignItems: "center",
               background: "transparent",
               border: "none",
               cursor: "pointer",
               color: "var(--text-dim)",
               fontSize: 9,
               flexShrink: 0,
-              padding: "0 2px",
+              padding: 0,
               letterSpacing: 1,
             }}
           >
             {resultOpen ? "▼" : "▶"}
           </button>
-        ) : (
-          <span style={{ width: 16, flexShrink: 0 }} />
-        )}
+        ) : null}
 
         {/* Tool name badge — theme-aware background */}
         <span
@@ -125,8 +127,8 @@ export default function ToolCallBlock({ name, summary, result, error, streaming 
                 padding: 0,
                 fontSize: "12px",
                 color: "var(--text-secondary)",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-all",
+                whiteSpace: "pre",
+                overflowX: "auto",
                 margin: 0,
               }}
             >
