@@ -133,6 +133,10 @@ class AgentTerminationException(Exception):
         super().__init__(full_message)
 
 
+def _json_for_display(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2)
+
+
 # ==============================
 # Agent implementation
 # ==============================
@@ -466,6 +470,65 @@ class GeosAgent:
         except Exception:
             return self._truncate_text(content, max_str)
 
+    def _format_process_result_for_display(self, payload: Dict[str, Any]) -> str:
+        lines: List[str] = []
+        command = payload.get("command") or payload.get("script_path")
+        if isinstance(command, str) and command:
+            prefix = "$ " if "command" in payload else "script: "
+            lines.append(f"{prefix}{command}")
+
+        if payload.get("returncode") is not None:
+            lines.append(f"exit code: {payload['returncode']}")
+
+        error = payload.get("error")
+        if isinstance(error, str) and error:
+            lines.append(f"error: {error}")
+
+        stdout = payload.get("stdout")
+        if isinstance(stdout, str) and stdout:
+            lines.extend(["", "stdout:", stdout.rstrip()])
+
+        stderr = payload.get("stderr")
+        if isinstance(stderr, str) and stderr:
+            lines.extend(["", "stderr:", stderr.rstrip()])
+
+        if not any(isinstance(payload.get(key), str) and payload.get(key) for key in ("stdout", "stderr", "error")):
+            lines.extend(["", "(no output)"])
+
+        return "\n".join(lines).strip()
+
+    def _format_tool_result_for_display(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        output_obj: Any,
+    ) -> str:
+        if isinstance(output_obj, str):
+            return output_obj
+
+        if not isinstance(output_obj, dict):
+            return _json_for_display(output_obj)
+
+        if tool_name == "read_file":
+            content = output_obj.get("content")
+            if isinstance(content, str):
+                return content
+
+        if tool_name == "write_file":
+            error = output_obj.get("error")
+            if not isinstance(error, str) or not error:
+                written = arguments.get("content")
+                if isinstance(written, str):
+                    return written
+
+        if any(key in output_obj for key in ("stdout", "stderr", "returncode")):
+            return self._format_process_result_for_display(output_obj)
+
+        if set(output_obj.keys()) == {"text"} and isinstance(output_obj.get("text"), str):
+            return output_obj["text"]
+
+        return _json_for_display(output_obj)
+
     def _compact_message_for_context(
         self,
         msg: Dict[str, Any],
@@ -752,6 +815,7 @@ class GeosAgent:
                 result_str = output_obj
             else:
                 result_str = json.dumps(output_obj, ensure_ascii=False)
+            display_str = self._format_tool_result_for_display(name, args, output_obj)
             self._log(
                 "tool_run_ok",
                 tool=name,
@@ -759,7 +823,7 @@ class GeosAgent:
                 result_preview=result_str[:500],
             )
             if self.stream_callback:
-                self.stream_callback("tool_result", {"name": name, "result": result_str[:2000]})
+                self.stream_callback("tool_result", {"name": name, "result": display_str[:2000]})
             return {
                 "role": "tool",
                 "tool_call_id": tool_call.id,
@@ -838,14 +902,24 @@ class GeosAgent:
         # Build the tool result the model expects
         if exc.tool_name == "confirm_action":
             approved = answer.lower() in ("y", "yes", "approve")
-            result = json.dumps({"approved": approved, "answer": answer})
+            result_obj = {"approved": approved, "answer": answer}
         else:
             # ask_user
-            result = json.dumps({"text": answer})
+            result_obj = {"text": answer}
+
+        result = json.dumps(result_obj)
 
         if self.stream_callback:
             self.stream_callback(
-                "tool_result", {"name": exc.tool_name, "result": result}
+                "tool_result",
+                {
+                    "name": exc.tool_name,
+                    "result": self._format_tool_result_for_display(
+                        exc.tool_name,
+                        self._safe_load_tool_arguments(tool_call.function.arguments or "{}"),
+                        result_obj,
+                    )[:2000],
+                },
             )
 
         self.messages.append({

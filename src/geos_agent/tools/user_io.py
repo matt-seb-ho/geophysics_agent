@@ -80,6 +80,16 @@ class AskUser(Tool):
                                         "items": {"type": "string"},
                                         "description": "Allowed options for select, radio, or checkbox fields.",
                                     },
+                                    "default": {
+                                        "oneOf": [
+                                            {"type": "string"},
+                                            {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                            },
+                                        ],
+                                        "description": "Optional default value. For checkbox fields, pass an array of selected options.",
+                                    },
                                     "placeholder": {"type": "string", "description": "Optional placeholder text."},
                                     "required": {"type": "boolean", "default": False},
                                 },
@@ -145,12 +155,18 @@ class AskUser(Tool):
                 field_type = str(field_def.get("type", "text"))
                 options = [str(option) for option in (field_def.get("options") or [])]
                 required = bool(field_def.get("required", False))
+                field_default = field_def.get("default")
                 placeholder = str(field_def.get("placeholder", "") or "")
 
                 while True:
                     field_prompt = f"{label}"
                     if options:
                         field_prompt += f" ({', '.join(options)})"
+                    if field_default not in (None, "", []):
+                        if isinstance(field_default, list):
+                            field_prompt += f" [default: {', '.join(str(item) for item in field_default)}]"
+                        else:
+                            field_prompt += f" [default: {field_default}]"
                     if placeholder:
                         field_prompt += f" [{placeholder}]"
                     if not required:
@@ -177,6 +193,9 @@ class AskUser(Tool):
                             value = raw
 
                     is_empty = len(value) == 0 if isinstance(value, list) else not str(value).strip()
+                    if is_empty and field_default not in (None, "", []):
+                        answers[field_id] = field_default
+                        break
                     if is_empty and not required:
                         answers[field_id] = value
                         break
