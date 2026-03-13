@@ -161,6 +161,7 @@ def _serialize_ui_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any
 
 def _build_session_payload(session: Dict[str, Any]) -> Dict[str, Any]:
     usage = session.get("token_usage") or _default_token_usage()
+    enable_logging = bool(session["config"].enable_logging)
     payload = {
         "sessionId": session["id"],
         "name": session.get("name", ""),
@@ -172,12 +173,18 @@ def _build_session_payload(session: Dict[str, Any]) -> Dict[str, Any]:
         "pendingInputJson": (
             json.dumps(session.get("pending_input"))
             if session.get("pending_input") is not None
+            and enable_logging
             else None
         ),
-        "agentMessagesJson": json.dumps(session.get("agent_messages", [])),
+        "agentMessagesJson": (
+            json.dumps(session.get("agent_messages", []))
+            if enable_logging
+            else None
+        ),
         "agentPendingStateJson": (
             json.dumps(session.get("agent_pending_state"))
             if session.get("agent_pending_state") is not None
+            and enable_logging
             else None
         ),
         "promptTokens": int(usage.get("prompt_tokens", 0)),
@@ -188,13 +195,13 @@ def _build_session_payload(session: Dict[str, Any]) -> Dict[str, Any]:
         "cacheWriteTokens": usage.get("cache_write_tokens"),
         "contextTokensEst": usage.get("context_tokens_est"),
         "compactionThreshold": usage.get("compaction_threshold"),
-        "messages": _serialize_ui_messages(session.get("ui_messages", [])),
+        "messages": _serialize_ui_messages(session.get("ui_messages", [])) if enable_logging else [],
     }
     return {key: value for key, value in payload.items() if value is not None}
 
 
 def _persist_session_state(session: Dict[str, Any]) -> None:
-    if not _chat_store or not session["config"].enable_logging:
+    if not _chat_store:
         return
 
     agent = session.get("agent")
@@ -544,11 +551,21 @@ async def _stream_agent_response(
         session["ui_messages"][assistant_index]["timestamp"] = _utc_now()
         session["ui_messages"][assistant_index]["streaming"] = streaming
 
-    # Snapshot outputs directory to detect new files
-    outputs_dir = Path(session["workspace"]) / "outputs"
-    pre_existing: set = set()
-    if outputs_dir.is_dir():
-        pre_existing = {str(p) for p in outputs_dir.rglob("*") if p.is_file()}
+    workspace_root = Path(session["workspace"]).resolve()
+
+    def snapshot_workspace_files() -> set[str]:
+        if not workspace_root.is_dir():
+            return set()
+        return {str(p) for p in workspace_root.rglob("*") if p.is_file()}
+
+    seen_files = snapshot_workspace_files()
+
+    def collect_new_files() -> List[str]:
+        nonlocal seen_files
+        current_files = snapshot_workspace_files()
+        new_files = sorted(current_files - seen_files)
+        seen_files = current_files
+        return [str(Path(p).relative_to(workspace_root)) for p in new_files]
 
     def run_agent() -> None:
         try:
@@ -691,6 +708,11 @@ async def _stream_agent_response(
 
             yield f"data: {json.dumps(event)}\n\n"
 
+            if event_type in {"tool_result", "tool_error"}:
+                new_files = collect_new_files()
+                if new_files:
+                    yield f"data: {json.dumps({'type': 'new_files', 'files': new_files})}\n\n"
+
             if event_type in TERMINAL_EVENT_TYPES:
                 break
     finally:
@@ -720,14 +742,9 @@ async def _stream_agent_response(
         session["message_count"] = session.get("message_count", 0) + 1
         session["last_message_at"] = _utc_now()
 
-        if outputs_dir.is_dir():
-            new_files = [
-                str(Path(p).relative_to(session["workspace"]))
-                for p in outputs_dir.rglob("*")
-                if Path(p).is_file() and str(p) not in pre_existing
-            ]
-            if new_files:
-                yield f"data: {json.dumps({'type': 'new_files', 'files': new_files})}\n\n"
+        new_files = collect_new_files()
+        if new_files:
+            yield f"data: {json.dumps({'type': 'new_files', 'files': new_files})}\n\n"
 
         _persist_session_state(session)
         yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
@@ -904,14 +921,20 @@ async def get_token_usage(session_id: str):
 
 @app.get("/api/chat-sessions")
 async def list_chat_sessions():
-    """List all persisted chat sessions."""
+    """List chat sessions, preferring live in-memory state over persisted snapshots."""
+    sessions_by_id = {
+        session["id"]: _session_summary_from_memory(session)
+        for session in _sessions.values()
+    }
+
     if _chat_store:
         try:
-            sessions = _chat_store.list_sessions()
-            return {"sessions": sessions}
+            for session in _chat_store.list_sessions():
+                sessions_by_id.setdefault(session["id"], session)
         except ConvexStoreError as exc:
             raise HTTPException(status_code=500, detail=str(exc))
-    sessions = [_session_summary_from_memory(session) for session in _sessions.values()]
+
+    sessions = list(sessions_by_id.values())
     sessions.sort(key=lambda item: item["lastMessageAt"], reverse=True)
     return {"sessions": sessions}
 
