@@ -14,6 +14,8 @@ const TOOL_COLORS: Record<string, string> = {
   run_shell:        "#4a8fbf",
   shell:            "#9b7ec4",
   python_exec:      "#9b7ec4",
+  run_python:       "#9b7ec4",
+  run_python_code:  "#9b7ec4",
   fetch_code:       "#6b9e78",
   run_geos:         "#e07810",
   ask_user:         "#4a8fbf",
