@@ -49,8 +49,10 @@ export default function ToolCallBlock({ name, summary, result, error, streaming 
         {hasOutput && !streaming ? (
           <button
             onClick={() => setResultOpen((v) => !v)}
+            aria-label={resultOpen ? "Collapse tool output" : "Expand tool output"}
             style={{
-              width: 14,
+              width: 24,
+              height: 24,
               display: "inline-flex",
               justifyContent: "center",
               alignItems: "center",
@@ -61,6 +63,7 @@ export default function ToolCallBlock({ name, summary, result, error, streaming 
               fontSize: 9,
               flexShrink: 0,
               padding: 0,
+              margin: "-5px",
               letterSpacing: 1,
             }}
           >
