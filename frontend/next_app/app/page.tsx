@@ -78,7 +78,6 @@ export default function HomePage() {
   const [selectedFileTabIds, setSelectedFileTabIds] = useState<string[]>([]);
   const [chatSelectionAnchorId, setChatSelectionAnchorId] = useState<string | null>(initTabId);
   const [fileSelectionAnchorId, setFileSelectionAnchorId] = useState<string | null>(null);
-  const [hoveredTabKey, setHoveredTabKey] = useState<string | null>(null);
 
   // ── Active chat state ──────────────────────────────────────────────────────
   const [sessionId, setSessionId]       = useState<string | null>(null);
@@ -728,20 +727,23 @@ export default function HomePage() {
     marginLeft: -1,
   });
 
-  const closeTabBtnStyle = (visible: boolean): React.CSSProperties => ({
+  const closeTabBtnStyle = (): React.CSSProperties => ({
     background: "transparent",
     border: "none",
     cursor: "pointer",
     color: "var(--text-dim)",
     fontFamily: "var(--font-mono)",
     fontSize: "13px",
-    padding: "0 4px",
+    width: 24,
+    height: 24,
+    padding: 0,
+    marginRight: -2,
     lineHeight: 1,
     display: "flex",
     alignItems: "center",
-    opacity: visible ? 1 : 0,
-    pointerEvents: visible ? "auto" : "none",
+    justifyContent: "center",
     transition: "opacity 0.12s ease",
+    flexShrink: 0,
   });
 
   const openTabContextMenu = (
@@ -967,42 +969,51 @@ export default function HomePage() {
           {chatTabs.map((tab) => {
             const isActive = tab.tabId === activeChatTabId && !settingsActive && !activeFileTab;
             const isSelected = selectedChatTabIds.includes(tab.tabId);
-            const tabKey = `chat:${tab.tabId}`;
             return (
               <div
                 key={tab.tabId}
+                className="tab-shell"
                 style={getTabShellStyle(isActive, isSelected)}
+                onClick={(e) => {
+                  if (e.shiftKey) {
+                    selectContiguousChatTabs(tab.tabId);
+                    return;
+                  }
+                  if (e.metaKey || e.ctrlKey) {
+                    toggleChatTabSelection(tab.tabId);
+                    return;
+                  }
+                  clearTabSelection();
+                  setChatSelectionAnchorId(tab.tabId);
+                  setFileSelectionAnchorId(null);
+                  if (tab.tabId === activeChatTabId) {
+                    setSettingsActive(false);
+                    setActiveFileTab(null);
+                    return;
+                  }
+                  switchToChatTab(tab.tabId);
+                }}
                 onContextMenu={(e) => openTabContextMenu(e, "chat", tab.tabId)}
-                onMouseEnter={() => setHoveredTabKey(tabKey)}
-                onMouseLeave={() => setHoveredTabKey((current) => (current === tabKey ? null : current))}
               >
                 <button
-                  onClick={(e) => {
-                    if (e.shiftKey) {
-                      selectContiguousChatTabs(tab.tabId);
-                      return;
-                    }
-                    if (e.metaKey || e.ctrlKey) {
-                      toggleChatTabSelection(tab.tabId);
-                      return;
-                    }
-                    clearTabSelection();
-                    setChatSelectionAnchorId(tab.tabId);
-                    setFileSelectionAnchorId(null);
-                    if (tab.tabId === activeChatTabId) {
-                      setSettingsActive(false);
-                      setActiveFileTab(null);
-                      return;
-                    }
-                    switchToChatTab(tab.tabId);
-                  }}
                   title={tab.label}
-                  style={{ background: "transparent", border: "none", cursor: "pointer", color: "inherit", fontFamily: "var(--font-mono)", fontSize: "11px", padding: 0, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  style={{ background: "transparent", border: "none", color: "inherit", fontFamily: "var(--font-mono)", fontSize: "11px", padding: 0, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", pointerEvents: "none" }}
                 >
                   {tab.label}
                 </button>
                 {chatTabs.length > 1 && (
-                  <button onClick={() => closeChatTab(tab.tabId)} style={closeTabBtnStyle(hoveredTabKey === tabKey)} title="Close tab">×</button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeChatTab(tab.tabId);
+                    }}
+                    className="tab-close"
+                    style={closeTabBtnStyle()}
+                    title="Close tab"
+                    aria-label={`Close ${tab.label}`}
+                  >
+                    ×
+                  </button>
                 )}
               </div>
             );
@@ -1012,16 +1023,12 @@ export default function HomePage() {
           {openTabs.map((tab) => {
             const isActive = !settingsActive && tab.path === activeFileTab;
             const isSelected = selectedFileTabIds.includes(tab.path);
-            const tabKey = `file:${tab.path}`;
             return (
               <div
                 key={tab.path}
+                className="tab-shell"
                 style={getTabShellStyle(isActive, isSelected)}
-                onContextMenu={(e) => openTabContextMenu(e, "file", tab.path)}
-                onMouseEnter={() => setHoveredTabKey(tabKey)}
-                onMouseLeave={() => setHoveredTabKey((current) => (current === tabKey ? null : current))}
-              >
-                <button onClick={(e) => {
+                onClick={(e) => {
                   if (e.shiftKey) {
                     selectContiguousFileTabs(tab.path);
                     return;
@@ -1035,10 +1042,24 @@ export default function HomePage() {
                   setFileSelectionAnchorId(tab.path);
                   setSettingsActive(false);
                   setActiveFileTab(tab.path);
-                }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "inherit", fontFamily: "var(--font-mono)", fontSize: "11px", padding: 0, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={tab.path}>
+                }}
+                onContextMenu={(e) => openTabContextMenu(e, "file", tab.path)}
+              >
+                <button style={{ background: "transparent", border: "none", color: "inherit", fontFamily: "var(--font-mono)", fontSize: "11px", padding: 0, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", pointerEvents: "none" }} title={tab.path}>
                   {tab.name}
                 </button>
-                <button onClick={() => handleCloseFileTab(tab.path)} style={closeTabBtnStyle(hoveredTabKey === tabKey)}>×</button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCloseFileTab(tab.path);
+                  }}
+                  className="tab-close"
+                  style={closeTabBtnStyle()}
+                  title="Close tab"
+                  aria-label={`Close ${tab.name}`}
+                >
+                  ×
+                </button>
               </div>
             );
           })}
@@ -1046,14 +1067,21 @@ export default function HomePage() {
           {/* Settings tab */}
           {settingsOpen && (
             <div
+              className="tab-shell"
               style={getTabShellStyle(settingsActive, false)}
-              onMouseEnter={() => setHoveredTabKey("settings")}
-              onMouseLeave={() => setHoveredTabKey((current) => (current === "settings" ? null : current))}
             >
               <button onClick={openSettings} style={{ background: "transparent", border: "none", cursor: "pointer", color: "inherit", fontFamily: "var(--font-mono)", fontSize: "11px", padding: 0 }}>
                 settings
               </button>
-              <button onClick={closeSettings} style={closeTabBtnStyle(hoveredTabKey === "settings")}>×</button>
+              <button
+                onClick={closeSettings}
+                className="tab-close"
+                style={closeTabBtnStyle()}
+                title="Close tab"
+                aria-label="Close settings"
+              >
+                ×
+              </button>
             </div>
           )}
         </div>

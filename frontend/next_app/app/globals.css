@@ -316,3 +316,22 @@ input[type="checkbox"] {
   background: var(--accent-bg);
   color: var(--accent);
 }
+
+.tab-close {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tab-shell:hover .tab-close,
+.tab-shell:focus-within .tab-close {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tab-close:hover,
+.tab-close:focus-visible {
+  background: var(--bg-elevated);
+  border-radius: 3px;
+  color: var(--text-primary);
+  outline: none;
+}
