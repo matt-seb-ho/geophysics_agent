@@ -4,6 +4,7 @@ export interface QuestionField {
   type: "text" | "textarea" | "select" | "radio" | "checkbox";
   options?: string[];
   placeholder?: string;
+  default?: string | string[];
   required?: boolean;
 }
 

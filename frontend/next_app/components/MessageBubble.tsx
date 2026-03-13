@@ -1,6 +1,8 @@
 "use client";
 import type { CSSProperties } from "react";
 import { useState } from "react";
+import * as Select from "@radix-ui/react-select";
+import { ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -17,6 +19,22 @@ function sanitizeAssistantContent(content: string): string {
 
 function formatTime(d: Date): string {
   return d.toTimeString().slice(0, 8);
+}
+
+function normalizeChoiceLabel(choice: string): string {
+  return choice.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function isCustomChoiceLabel(choice: string): boolean {
+  const normalized = normalizeChoiceLabel(choice);
+  return (
+    normalized === "other" ||
+    normalized.startsWith("other ") ||
+    normalized.includes("something else") ||
+    normalized.includes("something different") ||
+    (normalized.includes("describe below") &&
+      (normalized.includes("other") || normalized.includes("else") || normalized.includes("custom")))
+  );
 }
 
 function MarkdownPart({
@@ -61,6 +79,7 @@ function QuestionPart({
   canAnswer?: boolean;
   onAnswer?: (value: string) => void;
 }) {
+  const isInactive = !canAnswer;
   const [draft, setDraft] = useState(defaultValue ?? "");
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [fieldValues, setFieldValues] = useState<Record<string, string | string[]>>(() =>
@@ -68,33 +87,76 @@ function QuestionPart({
   );
 
   const hasFields = !!fields && fields.length > 0;
-  const otherChoice = choices?.find((choice) => choice.trim().toLowerCase() === "other");
-  const renderedChoices =
-    choices && choices.length > 0
-      ? allowCustomInput && !otherChoice
-        ? [...choices, "Other"]
-        : choices
-      : [];
+  const baseChoices = choices ?? [];
+  const seenChoices = new Set<string>();
+  let hasCustomChoice = false;
+  const renderedChoices = baseChoices.filter((choice) => {
+    const normalized = normalizeChoiceLabel(choice);
+    if (seenChoices.has(normalized)) return false;
+    seenChoices.add(normalized);
+
+    if (!allowCustomInput) return true;
+    if (isCustomChoiceLabel(choice)) {
+      if (hasCustomChoice) return false;
+      hasCustomChoice = true;
+    }
+    return true;
+  });
+  if (allowCustomInput && !hasCustomChoice) {
+    renderedChoices.push("Other");
+  }
 
   const setFieldValue = (fieldId: string, value: string | string[]) => {
     setFieldValues((prev) => ({ ...prev, [fieldId]: value }));
+  };
+
+  const getFieldDefaultValue = (field: QuestionField): string | string[] => {
+    if (field.type === "checkbox") {
+      if (Array.isArray(field.default)) return field.default;
+      if (typeof field.default === "string" && field.default.trim()) {
+        return field.default
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+      return [];
+    }
+
+    if (Array.isArray(field.default)) return "";
+
+    const fieldDefault = String(field.default ?? "").trim();
+    if (fieldDefault) return fieldDefault;
+
+    return "";
+  };
+
+  const hasAnyFieldDefaults = !!fields?.some((field) => {
+    const value = getFieldDefaultValue(field);
+    return Array.isArray(value) ? value.length > 0 : !!String(value).trim();
+  });
+
+  const useDefaults = () => {
+    if (!fields?.length) return;
+    setFieldValues(
+      Object.fromEntries(fields.map((field) => [field.id, getFieldDefaultValue(field)]))
+    );
   };
 
   const renderField = (field: QuestionField) => {
     const value = fieldValues[field.id];
     const commonLabelStyle: CSSProperties = {
       display: "block",
-      color: "var(--text-primary)",
+      color: isInactive ? "var(--text-dim)" : "var(--text-primary)",
       fontSize: "11.5px",
       marginBottom: 5,
     };
     const inputStyle: CSSProperties = {
       width: "100%",
       padding: "8px 10px",
-      background: "var(--bg-base)",
-      border: "1px solid var(--info)",
+      background: isInactive ? "var(--bg-elevated)" : "var(--bg-base)",
+      border: `1px solid ${isInactive ? "var(--border-mid)" : "var(--info)"}`,
       borderRadius: 2,
-      color: "var(--text-primary)",
+      color: isInactive ? "var(--text-dim)" : "var(--text-primary)",
       fontFamily: "var(--font-mono)",
       fontSize: "12.5px",
       outline: "none",
@@ -104,19 +166,43 @@ function QuestionPart({
       return (
         <label key={field.id} style={commonLabelStyle}>
           {field.label}
-          <select
-            value={typeof value === "string" ? value : ""}
-            onChange={(e) => setFieldValue(field.id, e.target.value)}
-            disabled={!canAnswer}
-            style={{ ...inputStyle, marginTop: 4 }}
-          >
-            <option value="">{field.placeholder ?? "Select an option"}</option>
-            {(field.options ?? []).map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+          <div style={{ marginTop: 4 }}>
+            <Select.Root
+              value={typeof value === "string" ? value : ""}
+              onValueChange={(nextValue) => setFieldValue(field.id, nextValue)}
+              disabled={!canAnswer}
+            >
+              <Select.Trigger
+                style={{
+                  ...inputStyle,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  cursor: isInactive ? "default" : "pointer",
+                }}
+              >
+                <Select.Value placeholder={field.placeholder ?? "Select an option"} />
+                <Select.Icon>
+                  <ChevronDown size={12} style={{ color: "var(--text-dim)" }} />
+                </Select.Icon>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Content
+                  className="radix-select-content"
+                  position="popper"
+                  sideOffset={4}
+                >
+                  <Select.Viewport>
+                    {(field.options ?? []).map((option) => (
+                      <Select.Item key={option} value={option} className="radix-select-item">
+                        <Select.ItemText>{option}</Select.ItemText>
+                      </Select.Item>
+                    ))}
+                  </Select.Viewport>
+                </Select.Content>
+              </Select.Portal>
+            </Select.Root>
+          </div>
         </label>
       );
     }
@@ -136,7 +222,7 @@ function QuestionPart({
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 6,
-                  color: "var(--text-primary)",
+                  color: isInactive ? "var(--text-dim)" : "var(--text-primary)",
                   fontSize: "12px",
                 }}
               >
@@ -171,7 +257,7 @@ function QuestionPart({
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 6,
-                  color: "var(--text-primary)",
+                  color: isInactive ? "var(--text-dim)" : "var(--text-primary)",
                   fontSize: "12px",
                 }}
               >
@@ -244,15 +330,9 @@ function QuestionPart({
       .join("\n");
   };
 
-  const canSubmitFields = !fields?.some((field) => {
-    if (!field.required) return false;
-    const value = fieldValues[field.id];
-    return Array.isArray(value) ? value.length === 0 : !String(value ?? "").trim();
-  });
-
   const submit = () => {
     const value = hasFields ? serializeFields() : draft.trim();
-    if (!value || !onAnswer) return;
+    if (!onAnswer) return;
     setDraft("");
     setShowCustomInput(false);
     onAnswer(value);
@@ -261,16 +341,17 @@ function QuestionPart({
   return (
     <div
       style={{
-        background: "var(--info-bg)",
-        border: "1px solid var(--info)",
+        background: isInactive ? "var(--bg-panel)" : "var(--info-bg)",
+        border: `1px solid ${isInactive ? "var(--border-mid)" : "var(--info)"}`,
         borderRadius: 2,
         padding: "8px 10px",
         marginBottom: 5,
+        opacity: isInactive ? 0.72 : 1,
       }}
     >
       <div
         style={{
-          color: "var(--info)",
+          color: isInactive ? "var(--text-dim)" : "var(--info)",
           fontSize: "10.5px",
           letterSpacing: "0.05em",
           marginBottom: 4,
@@ -278,14 +359,16 @@ function QuestionPart({
       >
         [agent question]
       </div>
-      <MarkdownPart content={content} />
+      <div style={{ color: isInactive ? "var(--text-secondary)" : undefined }}>
+        <MarkdownPart content={content} />
+      </div>
       {renderedChoices.length > 0 && (
         <div style={{ marginTop: 6, display: "flex", gap: 5, flexWrap: "wrap" }}>
           {renderedChoices.map((c) => (
             <button
               key={c}
               onClick={() => {
-                if (c.trim().toLowerCase() === "other") {
+                if (allowCustomInput && isCustomChoiceLabel(c)) {
                   setShowCustomInput(true);
                   return;
                 }
@@ -293,11 +376,11 @@ function QuestionPart({
               }}
               disabled={!canAnswer}
               style={{
-                background: "var(--bg-surface)",
-                border: "1px solid var(--info)",
+                background: isInactive ? "var(--bg-elevated)" : "var(--bg-surface)",
+                border: `1px solid ${isInactive ? "var(--border-mid)" : "var(--info)"}`,
                 borderRadius: 2,
                 padding: "3px 9px",
-                color: canAnswer ? "var(--info)" : "var(--text-secondary)",
+                color: isInactive ? "var(--text-dim)" : "var(--info)",
                 fontSize: "11px",
                 fontFamily: "var(--font-mono)",
                 cursor: canAnswer ? "pointer" : "default",
@@ -317,6 +400,24 @@ function QuestionPart({
         onAnswer &&
         (hasFields || renderedChoices.length === 0 || showCustomInput) && (
         <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "stretch" }}>
+          {hasFields && hasAnyFieldDefaults && (
+            <button
+              onClick={useDefaults}
+              style={{
+                padding: "0 12px",
+                background: "var(--bg-surface)",
+                border: "1px solid var(--info)",
+                borderRadius: 2,
+                color: "var(--info)",
+                fontFamily: "var(--font-mono)",
+                fontSize: "11.5px",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Use defaults
+            </button>
+          )}
           {!hasFields && (
             <input
               type="text"
@@ -345,16 +446,15 @@ function QuestionPart({
           )}
           <button
             onClick={submit}
-            disabled={hasFields ? !canSubmitFields : !draft.trim()}
             style={{
               padding: "0 12px",
-              background: hasFields ? (canSubmitFields ? "var(--info)" : "var(--bg-elevated)") : (draft.trim() ? "var(--info)" : "var(--bg-elevated)"),
+              background: "var(--info)",
               border: "1px solid var(--info)",
               borderRadius: 2,
-              color: hasFields ? (canSubmitFields ? "var(--bg-base)" : "var(--text-dim)") : (draft.trim() ? "var(--bg-base)" : "var(--text-dim)"),
+              color: "var(--bg-base)",
               fontFamily: "var(--font-mono)",
               fontSize: "11.5px",
-              cursor: hasFields ? (canSubmitFields ? "pointer" : "not-allowed") : (draft.trim() ? "pointer" : "not-allowed"),
+              cursor: "pointer",
               whiteSpace: "nowrap",
             }}
           >
