@@ -347,7 +347,7 @@ class SessionConfig(BaseModel):
     provider: Optional[str] = None
     max_steps: int = 100
     workspace_path: Optional[str] = None
-    enable_logging: bool = False
+    enable_logging: bool = True
     log_dir: Optional[str] = None
     enable_context_compaction: bool = True
     enable_reasoning: bool = True
@@ -732,8 +732,12 @@ async def _stream_agent_response(
             agent_obj = session["agent"]
             if hasattr(agent_obj, "_last_compaction_stats") and agent_obj._last_compaction_stats:
                 stats = agent_obj._last_compaction_stats
-                context_info["context_tokens_est"] = stats.get("tokens_before", 0)
-                context_info["compaction_threshold"] = stats.get("threshold", 100000)
+                context_info["context_tokens_est"] = stats.get("original_tokens_est", 0)
+                context_info["compaction_threshold"] = getattr(
+                    agent_obj.config,
+                    "context_compaction_trigger_tokens",
+                    100000,
+                )
             session["token_usage"] = {**usage, **context_info}
 
             yield f"data: {json.dumps({'type': 'token_usage', **usage, **context_info})}\n\n"
@@ -911,7 +915,17 @@ async def get_token_usage(session_id: str):
 
     if session.get("agent"):
         usage = session["agent"].client.get_token_usage()
-        session["token_usage"] = usage
+        context_info: Dict[str, Any] = {}
+        agent_obj = session["agent"]
+        if hasattr(agent_obj, "_last_compaction_stats") and agent_obj._last_compaction_stats:
+            stats = agent_obj._last_compaction_stats
+            context_info["context_tokens_est"] = stats.get("original_tokens_est", 0)
+            context_info["compaction_threshold"] = getattr(
+                agent_obj.config,
+                "context_compaction_trigger_tokens",
+                100000,
+            )
+        session["token_usage"] = {**usage, **context_info}
 
     return session.get(
         "token_usage",

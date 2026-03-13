@@ -89,7 +89,10 @@ export default function ChatHistorySidebar({
   const [draftName, setDraftName] = useState("");
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const contextMax = contextLength > 0 ? contextLength : 128000;
-  const contextValue = tokenUsage.turnPromptTokens ?? 0;
+  const contextValue =
+    tokenUsage.contextTokensEst !== undefined
+      ? tokenUsage.contextTokensEst
+      : tokenUsage.turnPromptTokens ?? 0;
 
   useEffect(() => {
     if (!contextMenu) return;

@@ -228,6 +228,9 @@ TOOLS AVAILABLE:
   • Purpose: Execute short Python snippets in subprocess.
   • Params: `code` (required string), `timeout_sec` (optional number, default 30).
   • Prefer `run_shell` for larger scripts.
+  • If the result includes `missing_packages`, `missing_modules`, or `suggested_commands`,
+    use `confirm_action` before running any suggested `uv add` or `uv sync` command via
+    `run_shell`, then retry `run_python_code`. Never install Python packages without approval.
 
   `run_geos`:
   • Purpose: Run GEOS-X simulations.
