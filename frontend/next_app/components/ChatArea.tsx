@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { Play, Square } from "lucide-react";
 import { Message, PendingInput } from "../lib/types";
 import MessageBubble from "./MessageBubble";
 
@@ -9,6 +10,7 @@ interface Props {
   pendingInput: PendingInput | null;
   sessionId: string | null;
   onSend: (text: string) => void;
+  onCancel: () => void;
   onToggleFileTree: () => void;
   showFileTree: boolean;
   onToggleSidebar?: () => void;
@@ -33,6 +35,7 @@ export default function ChatArea({
   pendingInput,
   sessionId,
   onSend,
+  onCancel,
   onToggleFileTree,
   showFileTree,
   onToggleSidebar,
@@ -180,34 +183,40 @@ export default function ChatArea({
           />
 
           <button
-            onClick={handleSubmit}
-            disabled={isStreaming || !inputText.trim()}
+            onClick={isStreaming ? onCancel : handleSubmit}
+            disabled={!isStreaming && !inputText.trim()}
+            title={isStreaming ? "Cancel response" : "Run prompt"}
+            aria-label={isStreaming ? "Cancel response" : "Run prompt"}
             style={{
-              padding: "8px 14px",
+              width: 44,
+              height: 44,
               background:
-                isStreaming || !inputText.trim()
+                !isStreaming && !inputText.trim()
                   ? "var(--bg-elevated)"
+                  : isStreaming
+                  ? "var(--bg-surface)"
                   : "var(--accent)",
-              border: "none",
+              border: `1px solid ${isStreaming ? "var(--danger, #d46a6a)" : "transparent"}`,
               color:
-                isStreaming || !inputText.trim()
+                !isStreaming && !inputText.trim()
                   ? "var(--text-dim)"
+                  : isStreaming
+                  ? "var(--danger, #d46a6a)"
                   : "var(--accent-contrast)",
-              fontSize: "13px",
-              fontFamily: "var(--font-mono)",
-              fontWeight: 600,
               borderRadius: 2,
               cursor:
-                isStreaming || !inputText.trim() ? "not-allowed" : "pointer",
+                !isStreaming && !inputText.trim() ? "not-allowed" : "pointer",
               flexShrink: 0,
-              transition: "background 0.15s",
-              letterSpacing: "0.04em",
+              transition: "background 0.15s, border-color 0.15s, color 0.15s",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             {isStreaming ? (
-              <span className="spinner" />
+              <Square size={16} strokeWidth={2.25} />
             ) : (
-              "run"
+              <Play size={16} strokeWidth={2.25} />
             )}
           </button>
         </div>

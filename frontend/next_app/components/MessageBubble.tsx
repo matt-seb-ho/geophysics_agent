@@ -366,7 +366,15 @@ function QuestionPart({
   );
 }
 
-function ErrorPart({ content, variant = "error" }: { content: string; variant?: "error" | "warning" }) {
+function ErrorPart({
+  content,
+  variant = "error",
+  hideLabel = false,
+}: {
+  content: string;
+  variant?: "error" | "warning";
+  hideLabel?: boolean;
+}) {
   const color   = variant === "error" ? "var(--error)"   : "var(--warning)";
   const bg      = variant === "error" ? "var(--error-bg)" : "var(--warning-bg)";
   const label   = variant === "error" ? "[error]"        : "[warning]";
@@ -380,7 +388,9 @@ function ErrorPart({ content, variant = "error" }: { content: string; variant?: 
         marginBottom: 5,
       }}
     >
-      <span style={{ color, fontSize: "10.5px", marginRight: 6 }}>{label}</span>
+      {!hideLabel && (
+        <span style={{ color, fontSize: "10.5px", marginRight: 6 }}>{label}</span>
+      )}
       <span style={{ color: "var(--text-primary)", fontSize: "12px" }}>{content}</span>
     </div>
   );
@@ -461,7 +471,14 @@ function renderPart(
     case "error":
       return <ErrorPart key={idx} content={part.content} variant="error" />;
     case "warning":
-      return <ErrorPart key={idx} content={part.content} variant="warning" />;
+      return (
+        <ErrorPart
+          key={idx}
+          content={part.content}
+          variant="warning"
+          hideLabel={part.hideLabel}
+        />
+      );
     case "image":
       return (
         <ImagePart key={idx} path={part.path} caption={part.caption} sessionId={sessionId} />

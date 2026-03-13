@@ -107,6 +107,7 @@ export default function HomePage() {
   sessionIdRef.current = sessionId;
   const activeChatTabIdRef = useRef<string>(initTabId);
   activeChatTabIdRef.current = activeChatTabId;
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // ── Load config + workspace from localStorage ─────────────────────────────
   useEffect(() => {
@@ -470,6 +471,10 @@ export default function HomePage() {
   };
 
   // ── Main send / stream ────────────────────────────────────────────────────
+  const cancelStreaming = () => {
+    abortControllerRef.current?.abort();
+  };
+
   const sendMessage = async (text: string) => {
     if (isStreaming) return;
     const sourceTabId = activeChatTabIdRef.current;
@@ -507,6 +512,32 @@ export default function HomePage() {
       fileCount,
     });
 
+    const parts: MessagePart[] = [];
+    let currentText = "";
+    let currentThinking = "";
+
+    const flushText = () => { if (currentText) { parts.push({ type: "text", content: currentText }); currentText = ""; } };
+    const finalizeParts = () => {
+      flushText();
+      if (currentThinking) {
+        parts.push({ type: "thinking", content: currentThinking });
+        currentThinking = "";
+      }
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const part = parts[i];
+        if (part.type === "tool_call" && part.streaming) {
+          parts[i] = { ...part, streaming: false };
+        }
+      }
+    };
+    const refreshUI = () => {
+      const snap: MessagePart[] = [...parts];
+      if (currentText) snap.push({ type: "text", content: currentText });
+      updateMessagesForTab(sourceTabId, (prev) =>
+        prev.map((m) => (m.id === assistantId ? { ...m, parts: snap } : m))
+      );
+    };
+
     try {
       const sid = await ensureSession(sourceTabId, config, workspacePath);
 
@@ -521,20 +552,14 @@ export default function HomePage() {
           .catch(() => {});
       }
 
-      const parts: MessagePart[] = [];
-      let currentText = "";
-      let currentThinking = "";
-
-      const flushText = () => { if (currentText) { parts.push({ type: "text", content: currentText }); currentText = ""; } };
-      const refreshUI = () => {
-        const snap: MessagePart[] = [...parts];
-        if (currentText) snap.push({ type: "text", content: currentText });
-        updateMessagesForTab(sourceTabId, (prev) =>
-          prev.map((m) => (m.id === assistantId ? { ...m, parts: snap } : m))
-        );
-      };
-
-      const res = await fetch(messageUrl(sid), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text }) });
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      const res = await fetch(messageUrl(sid), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+        signal: controller.signal,
+      });
       if (!res.ok || !res.body) throw new Error(`${res.status} ${res.statusText}`);
 
       const reader = res.body.getReader();
@@ -620,7 +645,7 @@ export default function HomePage() {
         }
       }
 
-      flushText();
+      finalizeParts();
       updateMessagesForTab(sourceTabId, (prev) =>
         prev.map((m) =>
           m.id === assistantId ? { ...m, parts, streaming: false, timestamp: new Date() } : m
@@ -628,6 +653,20 @@ export default function HomePage() {
       );
       getSessions().then(setSessions).catch(() => {});
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        updateMessagesForTab(sourceTabId, (prev) =>
+          prev.map((m) => {
+            if (m.id !== assistantId) return m;
+            return {
+              ...m,
+              parts: [{ type: "warning", content: "Response canceled.", hideLabel: true }],
+              streaming: false,
+              timestamp: new Date(),
+            };
+          })
+        );
+        return;
+      }
       updateMessagesForTab(sourceTabId, (prev) =>
         prev.map((m) =>
           m.id === assistantId
@@ -641,6 +680,7 @@ export default function HomePage() {
         )
       );
     } finally {
+      abortControllerRef.current = null;
       setIsStreaming(false);
     }
   };
@@ -1039,6 +1079,7 @@ export default function HomePage() {
               pendingInput={pendingInput}
               sessionId={sessionId}
               onSend={sendMessage}
+              onCancel={cancelStreaming}
               onToggleFileTree={() => setShowFileTree((v) => !v)}
               showFileTree={showFileTree}
               onToggleSidebar={() => setShowSidebar((v) => !v)}
@@ -1053,6 +1094,7 @@ export default function HomePage() {
           sessionId={sessionId}
           refreshKey={fileTreeRefreshKey}
           workspacePath={workspacePath}
+          isStreaming={isStreaming}
           onOpenFile={handleOpenFile}
         />
       )}

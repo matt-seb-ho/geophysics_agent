@@ -13,7 +13,7 @@ export type MessagePart =
   | { type: "tool_call"; name: string; summary: string; streaming?: boolean; result?: string; error?: string }
   | { type: "question"; content: string; choices?: string[]; default?: string; fields?: QuestionField[]; allowCustomInput?: boolean }
   | { type: "error"; content: string }
-  | { type: "warning"; content: string }
+  | { type: "warning"; content: string; hideLabel?: boolean }
   | { type: "image"; path: string; caption?: string }
   | { type: "dataframe"; path: string; caption?: string };
 

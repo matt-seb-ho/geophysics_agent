@@ -199,10 +199,17 @@ interface Props {
   sessionId: string | null;
   refreshKey: number;
   workspacePath: string;
+  isStreaming: boolean;
   onOpenFile?: (path: string, name: string) => void;
 }
 
-export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenFile }: Props) {
+export default function FileTree({
+  sessionId,
+  refreshKey,
+  workspacePath,
+  isStreaming,
+  onOpenFile,
+}: Props) {
   const [tree, setTree] = useState<FileNode | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -210,9 +217,9 @@ export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenF
   const [openPaths, setOpenPaths] = useState<Set<string>>(new Set());
   const prevTreeRef = useRef<FileNode | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (showLoading = true) => {
     if (!sessionId) return;
-    setLoading(true);
+    if (showLoading) setLoading(true);
     setError(null);
     try {
       const data = await getFileTree(sessionId);
@@ -227,13 +234,22 @@ export default function FileTree({ sessionId, refreshKey, workspacePath, onOpenF
     } catch (e) {
       setError(String(e));
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [sessionId]);
 
   useEffect(() => {
     load();
   }, [load, refreshKey]);
+
+  useEffect(() => {
+    if (!sessionId || !isStreaming) return;
+    load(false);
+    const intervalId = window.setInterval(() => {
+      load(false);
+    }, 2000);
+    return () => window.clearInterval(intervalId);
+  }, [sessionId, isStreaming, load]);
 
   const displayPath = workspace || workspacePath || "";
   const shortPath =
