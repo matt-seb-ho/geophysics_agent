@@ -147,9 +147,7 @@ async def run_experiment(
                 f.write(f"{'='*80}\n\n")
                 f.flush()
 
-                # Build environment with EXCLUDED_EXAMPLE_DIR for RAG contamination prevention
                 env = os.environ.copy()
-                env["EXCLUDED_EXAMPLE_DIR"] = experiment_name
 
                 # Run process
                 process = await asyncio.create_subprocess_exec(

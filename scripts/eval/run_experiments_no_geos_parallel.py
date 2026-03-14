@@ -14,11 +14,10 @@ import argparse
 import asyncio
 import json
 import os
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 
 DEFAULT_EVAL_PREAMBLE = """\
@@ -35,9 +34,12 @@ Do not try to run GEOS; author the best XML inputs directly from the spec and do
 --- BEGIN SIMULATION SPECIFICATION ---
 """
 
+EXCLUDED_GT_XML_FILENAMES_ENV = "EXCLUDED_GT_XML_FILENAMES"
+
 NO_GEOS_AGENT_CODE = r"""
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -45,6 +47,9 @@ from pathlib import Path
 from geos_agent.agent_config import AgentConfig
 from geos_agent.geos_agent import AgentTerminationException, GeosAgent
 from geos_agent.tools.utils import build_default_tools
+
+
+EXCLUDED_GT_XML_FILENAMES_ENV = "EXCLUDED_GT_XML_FILENAMES"
 
 
 def save_log(agent: GeosAgent, log_path: str) -> None:
@@ -77,6 +82,101 @@ def sanitize_system_prompt(prompt: str) -> str:
     return prompt
 
 
+def load_blocked_gt_xml_filenames() -> set[str]:
+    raw = os.environ.get(EXCLUDED_GT_XML_FILENAMES_ENV, "").strip()
+    if not raw:
+        return set()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return set()
+    if not isinstance(data, list):
+        return set()
+    return {
+        str(name).strip().lower()
+        for name in data
+        if str(name).strip().lower().endswith(".xml")
+    }
+
+
+def is_blocked_xml_path(path: str, blocked_xml_filenames: set[str]) -> bool:
+    if not blocked_xml_filenames:
+        return False
+    candidate = Path(path)
+    return candidate.suffix.lower() == ".xml" and candidate.name.lower() in blocked_xml_filenames
+
+
+def restrict_xml_access(tools: list, blocked_xml_filenames: set[str]) -> None:
+    if not blocked_xml_filenames:
+        return
+
+    for tool in tools:
+        if tool.name == "read_file":
+            original_run = tool.run
+
+            def read_file_run(
+                path: str,
+                max_chars: int = 4000,
+                start_line: int | None = None,
+                end_line: int | None = None,
+                start_marker: str | None = None,
+                end_marker: str | None = None,
+            ):
+                if is_blocked_xml_path(path, blocked_xml_filenames):
+                    return {
+                        "error": (
+                            "Access denied: XML files whose names match this "
+                            "experiment's ground-truth XML set are restricted."
+                        ),
+                        "path": path,
+                    }
+                return original_run(
+                    path=path,
+                    max_chars=max_chars,
+                    start_line=start_line,
+                    end_line=end_line,
+                    start_marker=start_marker,
+                    end_marker=end_marker,
+                )
+
+            tool.run = read_file_run
+
+        elif tool.name == "grep_search":
+            original_run = tool.run
+
+            def grep_search_run(regex_pattern: str, directory: str = "./"):
+                result = original_run(regex_pattern=regex_pattern, directory=directory)
+                if "results" not in result:
+                    return result
+                filtered_results = [
+                    item
+                    for item in result["results"]
+                    if not is_blocked_xml_path(str(item.get("filepath", "")), blocked_xml_filenames)
+                ]
+                result["results"] = filtered_results
+                result["count"] = len(filtered_results)
+                return result
+
+            tool.run = grep_search_run
+
+        elif tool.name == "search_technical":
+            original_run = tool.run
+
+            def search_technical_run(query: str, n_results: int = 5):
+                result = original_run(query=query, n_results=n_results)
+                if "results" not in result:
+                    return result
+                result["results"] = [
+                    item
+                    for item in result["results"]
+                    if not is_blocked_xml_path(str(item.get("xml_reference") or ""), blocked_xml_filenames)
+                    and not is_blocked_xml_path(str(item.get("source_path") or ""), blocked_xml_filenames)
+                ]
+                return result
+
+            tool.run = search_technical_run
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run GEOS-Agent with run_geos removed from the tool set."
@@ -101,7 +201,10 @@ def main() -> None:
     args = parser.parse_args()
 
     workspace_root = Path(args.workspace).resolve()
-    tools = [tool for tool in build_default_tools(workspace_root) if tool.name != "run_geos"]
+    blocked_xml_filenames = load_blocked_gt_xml_filenames()
+    disabled_tools = {"run_geos", "run_shell", "run_python_code"}
+    tools = [tool for tool in build_default_tools(workspace_root) if tool.name not in disabled_tools]
+    restrict_xml_access(tools, blocked_xml_filenames)
 
     config = AgentConfig(
         model=args.model,
@@ -164,8 +267,29 @@ def get_project_root() -> Path:
     return (script_dir / "../..").resolve()
 
 
+def collect_ground_truth_xml_filenames(gt_experiment_dir: Path) -> List[str]:
+    """Collect all XML basenames under one ground-truth experiment directory."""
+    if not gt_experiment_dir.exists():
+        return []
+    return sorted({path.name.lower() for path in gt_experiment_dir.rglob("*.xml") if path.is_file()})
+
+
+def build_experiment_env(
+    experiment_name: str,
+    ground_truth_dir: Path,
+    base_env: Dict[str, str] | None = None,
+) -> Tuple[Dict[str, str], Path, List[str]]:
+    """Build subprocess env vars that prevent XML leakage for one experiment."""
+    env = dict(base_env or os.environ.copy())
+    gt_experiment_dir = ground_truth_dir / experiment_name
+    blocked_xml_filenames = collect_ground_truth_xml_filenames(gt_experiment_dir)
+    env[EXCLUDED_GT_XML_FILENAMES_ENV] = json.dumps(blocked_xml_filenames)
+    return env, gt_experiment_dir, blocked_xml_filenames
+
+
 async def run_experiment(
     experiment_dir: Path,
+    ground_truth_dir: Path,
     log_dir: Path,
     semaphore: asyncio.Semaphore,
     experiment_name: str,
@@ -213,19 +337,25 @@ async def run_experiment(
 
         try:
             with open(log_file, "w", encoding="utf-8") as f:
+                env, gt_experiment_dir, blocked_xml_filenames = build_experiment_env(
+                    experiment_name=experiment_name,
+                    ground_truth_dir=ground_truth_dir,
+                )
                 f.write(f"{'=' * 80}\n")
                 f.write(f"Experiment: {experiment_name}\n")
                 f.write(f"Started: {datetime.now().isoformat()}\n")
                 f.write(f"Workspace: {experiment_dir}\n")
+                f.write(f"Ground truth: {gt_experiment_dir}\n")
                 f.write(f"Model: {model}\n")
                 f.write(f"Max steps: {max_steps}\n")
                 f.write("Runner mode: no run_geos tool\n")
+                f.write("Disabled tools: run_geos, run_shell, run_python_code\n")
+                f.write(f"Blocked GT XML basenames ({len(blocked_xml_filenames)}): ")
+                f.write(json.dumps(blocked_xml_filenames))
+                f.write("\n")
                 f.write(f"Command: {json.dumps(cmd)}\n")
                 f.write(f"{'=' * 80}\n\n")
                 f.flush()
-
-                env = os.environ.copy()
-                env["EXCLUDED_EXAMPLE_DIR"] = experiment_name
 
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -264,6 +394,7 @@ async def run_experiment(
 
 async def run_all_experiments(
     experiments_dir: Path,
+    ground_truth_dir: Path,
     log_dir: Path,
     max_workers: int,
     model: str,
@@ -292,6 +423,7 @@ async def run_all_experiments(
     print(f"Max workers: {max_workers}")
     print(f"Model: {model}")
     print(f"Max steps: {max_steps}")
+    print(f"Ground truth directory: {ground_truth_dir}")
     print(f"Stdout/stderr logs: {log_dir}")
     if jsonl_log_dir:
         print(f"JSONL conversation logs: {jsonl_log_dir}")
@@ -301,6 +433,7 @@ async def run_all_experiments(
     tasks = [
         run_experiment(
             exp_dir,
+            ground_truth_dir,
             log_dir,
             semaphore,
             exp_dir.name,
@@ -380,6 +513,12 @@ def main():
         help="Path to JSONL conversation logs directory (default: none, no JSONL logs)",
     )
     parser.add_argument(
+        "--ground-truth-dir",
+        type=Path,
+        default=None,
+        help="Path to ground-truth experiments directory (default: data/eval/experiments_gt)",
+    )
+    parser.add_argument(
         "--experiments",
         "-e",
         nargs="+",
@@ -431,10 +570,14 @@ def main():
 
     project_root = get_project_root()
     experiments_dir = args.experiments_dir or project_root / "data/eval/experiments_subset"
+    ground_truth_dir = args.ground_truth_dir or project_root / "data/eval/experiments_gt"
     log_dir = args.log_dir or project_root / "data/eval/logs"
 
     if not experiments_dir.exists():
         print(f"{Colors.FAIL}Error: Experiments directory not found: {experiments_dir}{Colors.ENDC}")
+        sys.exit(1)
+    if not ground_truth_dir.exists():
+        print(f"{Colors.FAIL}Error: Ground-truth directory not found: {ground_truth_dir}{Colors.ENDC}")
         sys.exit(1)
 
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -451,6 +594,7 @@ def main():
     asyncio.run(
         run_all_experiments(
             experiments_dir=experiments_dir,
+            ground_truth_dir=ground_truth_dir,
             log_dir=log_dir,
             max_workers=args.workers,
             model=args.model,

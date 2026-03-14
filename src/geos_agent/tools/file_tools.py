@@ -210,23 +210,6 @@ class FileToolsPipeline:
         start_marker: Optional[str] = None,
         end_marker: Optional[str] = None,
     ) -> Dict[str, Any]:
-        # RAG contamination prevention
-        import os
-        excluded_dir = os.environ.get("EXCLUDED_EXAMPLE_DIR", "").lower().strip()
-        if excluded_dir:
-            try:
-                fp_lower = str(filepath).lower()
-                if fp_lower.endswith(".xml") or fp_lower.endswith(".rst"):
-                    p = Path(filepath)
-                    if excluded_dir in str(p.parent).lower():
-                        ext = p.suffix.lstrip(".").upper() or "FILE"
-                        return {
-                            "error": f"Access denied: {ext} files from '{excluded_dir}' are restricted during this experiment.",
-                            "path": str(filepath),
-                        }
-            except Exception:
-                pass
-
         resolved_path = self._resolve_read_path(filepath)
         if resolved_path is None:
             p = Path(filepath)

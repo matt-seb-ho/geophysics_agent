@@ -642,10 +642,6 @@ Three ChromaDB collections are available, each serving a distinct purpose.
 | "How is X typically structured in practice?" | `search_technical` | `read_file(xml_reference, ...)` |
 | "What solver handles poromechanics?" | `search_navigator` | Optional |
 
-### Exclusion during evaluation
-
-When `EXCLUDED_EXAMPLE_DIR` is set (during benchmark runs), `search_navigator` and `search_technical` silently drop results whose `source_path` matches the excluded experiment directory. `read_file` also blocks `.xml` and `.rst` files from that directory. `search_schema` is never filtered — it describes general GEOS syntax, not any specific example.
-
 ---
 
 *This primer is based on GEOS documentation as of the latest version. For the most up-to-date information, consult the official documentation at https://geosx-geosx.readthedocs-hosted.com/*

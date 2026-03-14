@@ -169,9 +169,6 @@ class MultiTurnExperimentRunner:
 
         experiment_name = self.experiment_dir.name
 
-        # Set EXCLUDED_EXAMPLE_DIR to prevent RAG contamination
-        os.environ["EXCLUDED_EXAMPLE_DIR"] = experiment_name
-
         print(
             f"{Colors.OKCYAN}{Colors.BOLD}▶ Starting multi-turn experiment: "
             f"{experiment_name}{Colors.ENDC}"
