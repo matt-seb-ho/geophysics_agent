@@ -14,6 +14,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -28,6 +29,9 @@ a natural language specification. Use the documentation search tools \
 and patterns, then author the configuration files yourself. You can read files \
 with read_file or grep_search and modify them with write_file or edit_file. \
 If a tool blocks access to a file, move on and rely on documentation search instead.
+You may read XML files and examples that are not specific to this task. \
+The only restricted XML files are ground-truth files for the current experiment \
+whose filenames match the blocked reference set for this task.
 
 You do not have access to simulation execution tools in this evaluation run.
 Do not try to run GEOS; author the best XML inputs directly from the spec and docs.
@@ -36,6 +40,7 @@ Do not try to run GEOS; author the best XML inputs directly from the spec and do
 """
 
 EXCLUDED_GT_XML_FILENAMES_ENV = "EXCLUDED_GT_XML_FILENAMES"
+EXCLUDED_RST_PATHS_ENV = "EXCLUDED_RST_PATHS"
 
 NO_GEOS_AGENT_CODE = r"""
 import argparse
@@ -51,6 +56,7 @@ from geos_agent.tools.utils import build_default_tools
 
 
 EXCLUDED_GT_XML_FILENAMES_ENV = "EXCLUDED_GT_XML_FILENAMES"
+EXCLUDED_RST_PATHS_ENV = "EXCLUDED_RST_PATHS"
 
 
 def save_log(agent: GeosAgent, log_path: str) -> None:
@@ -100,6 +106,27 @@ def load_blocked_gt_xml_filenames() -> set[str]:
     }
 
 
+def load_blocked_rst_paths() -> set[str]:
+    raw = os.environ.get(EXCLUDED_RST_PATHS_ENV, "").strip()
+    if not raw:
+        return set()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return set()
+    if not isinstance(data, list):
+        return set()
+    return {
+        normalize_path(str(path))
+        for path in data
+        if str(path).strip().lower().endswith(".rst")
+    }
+
+
+def normalize_path(path: str) -> str:
+    return str(Path(path)).replace("\\", "/").lower()
+
+
 def is_blocked_xml_path(path: str, blocked_xml_filenames: set[str]) -> bool:
     if not blocked_xml_filenames:
         return False
@@ -107,14 +134,26 @@ def is_blocked_xml_path(path: str, blocked_xml_filenames: set[str]) -> bool:
     return candidate.suffix.lower() == ".xml" and candidate.name.lower() in blocked_xml_filenames
 
 
-def restrict_xml_access(tools: list, blocked_xml_filenames: set[str]) -> None:
-    if not blocked_xml_filenames:
+def is_blocked_rst_path(path: str, blocked_rst_paths: set[str]) -> bool:
+    if not blocked_rst_paths:
+        return False
+    normalized = normalize_path(path)
+    return any(
+        normalized == blocked_path or normalized.endswith(f"/{blocked_path}")
+        for blocked_path in blocked_rst_paths
+    )
+
+
+def restrict_reference_access(
+    tools: list,
+    blocked_xml_filenames: set[str],
+    blocked_rst_paths: set[str],
+) -> None:
+    if not blocked_xml_filenames and not blocked_rst_paths:
         return
 
     for tool in tools:
         if tool.name == "read_file":
-            original_run = tool.run
-
             def read_file_run(
                 path: str,
                 max_chars: int = 4000,
@@ -122,6 +161,7 @@ def restrict_xml_access(tools: list, blocked_xml_filenames: set[str]) -> None:
                 end_line: int | None = None,
                 start_marker: str | None = None,
                 end_marker: str | None = None,
+                _original_run=tool.run,
             ):
                 if is_blocked_xml_path(path, blocked_xml_filenames):
                     return {
@@ -131,7 +171,15 @@ def restrict_xml_access(tools: list, blocked_xml_filenames: set[str]) -> None:
                         ),
                         "path": path,
                     }
-                return original_run(
+                if is_blocked_rst_path(path, blocked_rst_paths):
+                    return {
+                        "error": (
+                            "Access denied: the documentation Example.rst file "
+                            "for this experiment is restricted."
+                        ),
+                        "path": path,
+                    }
+                return _original_run(
                     path=path,
                     max_chars=max_chars,
                     start_line=start_line,
@@ -143,16 +191,19 @@ def restrict_xml_access(tools: list, blocked_xml_filenames: set[str]) -> None:
             tool.run = read_file_run
 
         elif tool.name == "grep_search":
-            original_run = tool.run
-
-            def grep_search_run(regex_pattern: str, directory: str = "./"):
-                result = original_run(regex_pattern=regex_pattern, directory=directory)
+            def grep_search_run(
+                regex_pattern: str,
+                directory: str = "./",
+                _original_run=tool.run,
+            ):
+                result = _original_run(regex_pattern=regex_pattern, directory=directory)
                 if "results" not in result:
                     return result
                 filtered_results = [
                     item
                     for item in result["results"]
                     if not is_blocked_xml_path(str(item.get("filepath", "")), blocked_xml_filenames)
+                    and not is_blocked_rst_path(str(item.get("filepath", "")), blocked_rst_paths)
                 ]
                 result["results"] = filtered_results
                 result["count"] = len(filtered_results)
@@ -160,11 +211,31 @@ def restrict_xml_access(tools: list, blocked_xml_filenames: set[str]) -> None:
 
             tool.run = grep_search_run
 
-        elif tool.name == "search_technical":
-            original_run = tool.run
+        elif tool.name == "search_navigator":
+            def search_navigator_run(
+                query: str,
+                n_results: int = 5,
+                _original_run=tool.run,
+            ):
+                result = _original_run(query=query, n_results=n_results)
+                if "results" not in result:
+                    return result
+                result["results"] = [
+                    item
+                    for item in result["results"]
+                    if not is_blocked_rst_path(str(item.get("source") or ""), blocked_rst_paths)
+                ]
+                return result
 
-            def search_technical_run(query: str, n_results: int = 5):
-                result = original_run(query=query, n_results=n_results)
+            tool.run = search_navigator_run
+
+        elif tool.name == "search_technical":
+            def search_technical_run(
+                query: str,
+                n_results: int = 5,
+                _original_run=tool.run,
+            ):
+                result = _original_run(query=query, n_results=n_results)
                 if "results" not in result:
                     return result
                 result["results"] = [
@@ -172,6 +243,7 @@ def restrict_xml_access(tools: list, blocked_xml_filenames: set[str]) -> None:
                     for item in result["results"]
                     if not is_blocked_xml_path(str(item.get("xml_reference") or ""), blocked_xml_filenames)
                     and not is_blocked_xml_path(str(item.get("source_path") or ""), blocked_xml_filenames)
+                    and not is_blocked_rst_path(str(item.get("source_path") or ""), blocked_rst_paths)
                 ]
                 return result
 
@@ -203,9 +275,10 @@ def main() -> None:
 
     workspace_root = Path(args.workspace).resolve()
     blocked_xml_filenames = load_blocked_gt_xml_filenames()
+    blocked_rst_paths = load_blocked_rst_paths()
     disabled_tools = {"run_geos", "run_shell", "run_python_code"}
     tools = [tool for tool in build_default_tools(workspace_root) if tool.name not in disabled_tools]
-    restrict_xml_access(tools, blocked_xml_filenames)
+    restrict_reference_access(tools, blocked_xml_filenames, blocked_rst_paths)
 
     config = AgentConfig(
         model=args.model,
@@ -268,6 +341,33 @@ def get_project_root() -> Path:
     return (script_dir / "../..").resolve()
 
 
+def extract_example_label(title: str) -> str | None:
+    match = re.match(r"\s*\.\.\s*_([^:]+):", title or "")
+    return match.group(1) if match else None
+
+
+def load_example_rst_paths(example_pairs_path: Path) -> Dict[str, str]:
+    """Load experiment-name to rst_path mappings from example_pairs.jsonl."""
+    if not example_pairs_path.exists():
+        return {}
+
+    mappings: Dict[str, str] = {}
+    with example_pairs_path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            label = extract_example_label(str(record.get("title", "")))
+            rst_path = str(record.get("rst_path", "")).strip()
+            if label and rst_path:
+                mappings[label] = rst_path
+    return mappings
+
+
 def collect_ground_truth_xml_filenames(gt_experiment_dir: Path) -> List[str]:
     """Collect all XML basenames under one ground-truth experiment directory."""
     if not gt_experiment_dir.exists():
@@ -278,19 +378,23 @@ def collect_ground_truth_xml_filenames(gt_experiment_dir: Path) -> List[str]:
 def build_experiment_env(
     experiment_name: str,
     ground_truth_dir: Path,
+    example_rst_paths: Dict[str, str],
     base_env: Dict[str, str] | None = None,
-) -> Tuple[Dict[str, str], Path, List[str]]:
+) -> Tuple[Dict[str, str], Path, List[str], List[str]]:
     """Build subprocess env vars that prevent XML leakage for one experiment."""
     env = dict(base_env or os.environ.copy())
     gt_experiment_dir = ground_truth_dir / experiment_name
     blocked_xml_filenames = collect_ground_truth_xml_filenames(gt_experiment_dir)
+    blocked_rst_paths = [example_rst_paths[experiment_name]] if experiment_name in example_rst_paths else []
     env[EXCLUDED_GT_XML_FILENAMES_ENV] = json.dumps(blocked_xml_filenames)
-    return env, gt_experiment_dir, blocked_xml_filenames
+    env[EXCLUDED_RST_PATHS_ENV] = json.dumps(blocked_rst_paths)
+    return env, gt_experiment_dir, blocked_xml_filenames, blocked_rst_paths
 
 
 async def run_experiment(
     experiment_dir: Path,
     ground_truth_dir: Path,
+    example_rst_paths: Dict[str, str],
     log_dir: Path,
     semaphore: asyncio.Semaphore,
     experiment_name: str,
@@ -338,9 +442,10 @@ async def run_experiment(
 
         try:
             with open(log_file, "w", encoding="utf-8") as f:
-                env, gt_experiment_dir, blocked_xml_filenames = build_experiment_env(
+                env, gt_experiment_dir, blocked_xml_filenames, blocked_rst_paths = build_experiment_env(
                     experiment_name=experiment_name,
                     ground_truth_dir=ground_truth_dir,
+                    example_rst_paths=example_rst_paths,
                 )
                 f.write(f"{'=' * 80}\n")
                 f.write(f"Experiment: {experiment_name}\n")
@@ -353,6 +458,9 @@ async def run_experiment(
                 f.write("Disabled tools: run_geos, run_shell, run_python_code\n")
                 f.write(f"Blocked GT XML basenames ({len(blocked_xml_filenames)}): ")
                 f.write(json.dumps(blocked_xml_filenames))
+                f.write("\n")
+                f.write(f"Blocked Example.rst paths ({len(blocked_rst_paths)}): ")
+                f.write(json.dumps(blocked_rst_paths))
                 f.write("\n")
                 f.write(f"Command: {json.dumps(cmd)}\n")
                 f.write(f"{'=' * 80}\n\n")
@@ -396,6 +504,7 @@ async def run_experiment(
 async def run_all_experiments(
     experiments_dir: Path,
     ground_truth_dir: Path,
+    example_rst_paths: Dict[str, str],
     log_dir: Path,
     max_workers: int,
     model: str,
@@ -435,6 +544,7 @@ async def run_all_experiments(
         run_experiment(
             exp_dir,
             ground_truth_dir,
+            example_rst_paths,
             log_dir,
             semaphore,
             exp_dir.name,
@@ -520,6 +630,12 @@ def main():
         help="Path to ground-truth experiments directory (default: data/eval/experiments_gt)",
     )
     parser.add_argument(
+        "--example-pairs-path",
+        type=Path,
+        default=None,
+        help="Path to example_pairs.jsonl used to map experiment names to Example.rst paths",
+    )
+    parser.add_argument(
         "--experiments",
         "-e",
         nargs="+",
@@ -572,13 +688,18 @@ def main():
     project_root = get_project_root()
     experiments_dir = args.experiments_dir or project_root / "data/eval/experiments_subset"
     ground_truth_dir = args.ground_truth_dir or project_root / "data/eval/experiments_gt"
+    example_pairs_path = args.example_pairs_path or project_root / "data/eval/example_pairs.jsonl"
     log_dir = args.log_dir or project_root / "data/eval/logs"
+    example_rst_paths = load_example_rst_paths(example_pairs_path)
 
     if not experiments_dir.exists():
         print(f"{Colors.FAIL}Error: Experiments directory not found: {experiments_dir}{Colors.ENDC}")
         sys.exit(1)
     if not ground_truth_dir.exists():
         print(f"{Colors.FAIL}Error: Ground-truth directory not found: {ground_truth_dir}{Colors.ENDC}")
+        sys.exit(1)
+    if not example_pairs_path.exists():
+        print(f"{Colors.FAIL}Error: example_pairs.jsonl not found: {example_pairs_path}{Colors.ENDC}")
         sys.exit(1)
 
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -596,6 +717,7 @@ def main():
         run_all_experiments(
             experiments_dir=experiments_dir,
             ground_truth_dir=ground_truth_dir,
+            example_rst_paths=example_rst_paths,
             log_dir=log_dir,
             max_workers=args.workers,
             model=args.model,
