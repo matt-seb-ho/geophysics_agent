@@ -39,6 +39,22 @@ Do not try to run GEOS; author the best XML inputs directly from the spec and do
 --- BEGIN SIMULATION SPECIFICATION ---
 """
 
+DYNAMIC_CHEATSHEET_INSTRUCTION_PREAMBLE = """\
+Dynamic cheatsheet mode is enabled for this run.
+
+Before doing any other substantive retrieval, read `cheatsheet.md` and use it as working memory for this task.
+Treat it as high-value heuristic guidance even if some entries may be incomplete, stale, or not fully verified.
+Do not ignore it just because it may be imperfect: use it aggressively for search terms, solver patterns, XML structure, and debugging ideas, then cross-check against documentation when practical.
+If documentation is sparse but a cheatsheet entry looks plausible, you may still use it and state the assumption.
+
+You are also expected to improve `cheatsheet.md` during the run whenever you learn something reusable.
+If you discover a reusable pattern, fix, search strategy, warning, or even a plausible-but-unverified heuristic, update `cheatsheet.md` before finishing.
+This is part of successful task completion in dynamic cheatsheet mode. A run that benefits from the cheatsheet but never improves it is usually incomplete.
+Tentative notes are allowed, but label them clearly as tentative or needing verification.
+
+--- END DYNAMIC CHEATSHEET MODE ---
+"""
+
 EXCLUDED_GT_XML_FILENAMES_ENV = "EXCLUDED_GT_XML_FILENAMES"
 EXCLUDED_RST_PATHS_ENV = "EXCLUDED_RST_PATHS"
 
@@ -51,12 +67,28 @@ import sys
 from pathlib import Path
 
 from geos_agent.agent_config import AgentConfig
+from geos_agent.constants import CHEATSHEET_PATH
 from geos_agent.geos_agent import AgentTerminationException, GeosAgent
 from geos_agent.tools.utils import build_default_tools
 
 
 EXCLUDED_GT_XML_FILENAMES_ENV = "EXCLUDED_GT_XML_FILENAMES"
 EXCLUDED_RST_PATHS_ENV = "EXCLUDED_RST_PATHS"
+DYNAMIC_CHEATSHEET_PROMPT = '''
+
+DYNAMIC CHEATSHEET ACCESS:
+  • This mode is ON. You are expected to actively use `cheatsheet.md`, not merely ignore it.
+  • Exception to the usual file-location rules: you may also read, write, and edit `cheatsheet.md`.
+  • Your first substantive retrieval step should be `read_file(path="cheatsheet.md")` so you can mine prior runs for search terms, XML patterns, solver setups, and pitfalls.
+  • Treat `cheatsheet.md` as heuristic memory. It may be partially wrong, stale, or incomplete, but it is still valuable and should influence your plan.
+  • Do not discard cheatsheet guidance just because it is not fully verified. Cross-check against documentation when practical; if docs are sparse, you may still rely on plausible cheatsheet guidance and state assumptions.
+  • You are expected to leave the cheatsheet better than you found it whenever the run yields reusable information.
+  • If this run teaches you a reusable pattern, fix, search strategy, caution, or plausible heuristic, update `cheatsheet.md` before finishing.
+  • In dynamic cheatsheet mode, successful completion includes considering and usually making a cheatsheet update.
+  • Tentative notes are allowed if they are clearly labeled as tentative or needing verification.
+  • Prefer preserving useful existing content when editing the cheatsheet. Do not replace it wholesale unless you intentionally carry content forward.
+  • Never copy current-task ground truth into `cheatsheet.md`.
+'''
 
 
 def save_log(agent: GeosAgent, log_path: str) -> None:
@@ -87,6 +119,221 @@ def sanitize_system_prompt(prompt: str) -> str:
         "4. Validate the XML structure and assumptions from documentation instead of running GEOS\n",
     )
     return prompt
+
+
+def append_dynamic_cheatsheet_instructions(prompt: str) -> str:
+    return f"{DYNAMIC_CHEATSHEET_PROMPT}\n\n{prompt.rstrip()}"
+
+
+def resolve_dynamic_cheatsheet_path(path: str) -> Path | None:
+    normalized = path.strip().replace("\\", "/")
+    if normalized in {"cheatsheet.md", "./cheatsheet.md"}:
+        return CHEATSHEET_PATH
+    try:
+        candidate = Path(path).resolve()
+    except Exception:
+        return None
+    return CHEATSHEET_PATH if candidate == CHEATSHEET_PATH.resolve() else None
+
+
+def read_dynamic_cheatsheet(
+    display_path: str,
+    max_chars: int = 4000,
+    start_line: int | None = None,
+    end_line: int | None = None,
+    start_marker: str | None = None,
+    end_marker: str | None = None,
+    *,
+    pipeline,
+):
+    if not CHEATSHEET_PATH.exists():
+        return {"error": f"File not found: {display_path}", "resolved_path": str(CHEATSHEET_PATH)}
+
+    try:
+        text = CHEATSHEET_PATH.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return {"error": f"Failed to read file {display_path}: {exc!r}", "resolved_path": str(CHEATSHEET_PATH)}
+
+    result = {"path": display_path, "resolved_path": str(CHEATSHEET_PATH)}
+    if start_marker or end_marker:
+        extracted = pipeline._extract_by_markers(text, start_marker, end_marker)
+        result.update(extracted)
+        if "error" in extracted:
+            return result
+        result.update(pipeline._cap_content_lines(result.get("content", "")))
+        return result
+
+    if start_line is not None or end_line is not None:
+        extracted = pipeline._extract_by_lines(text, start_line, end_line)
+        result.update(extracted)
+        if "error" in extracted:
+            return result
+        result.update(pipeline._cap_content_lines(result.get("content", "")))
+        return result
+
+    line_capped = pipeline._cap_content_lines(text)
+    result.update(line_capped)
+    content_for_chars = result.get("content", "")
+    if len(content_for_chars) > max_chars:
+        result.update(
+            {
+                "content": content_for_chars[:max_chars] + "\n...[truncated]...",
+                "truncated": True,
+                "total_chars": len(content_for_chars),
+            }
+        )
+        return result
+
+    result["total_chars"] = len(content_for_chars)
+    return result
+
+
+def write_dynamic_cheatsheet(display_path: str, content: str, overwrite: bool = True):
+    CHEATSHEET_PATH.parent.mkdir(parents=True, exist_ok=True)
+    mode = "w" if overwrite or not CHEATSHEET_PATH.exists() else "a"
+    try:
+        with CHEATSHEET_PATH.open(mode, encoding="utf-8") as handle:
+            handle.write(content)
+    except Exception as exc:
+        return {"error": f"Failed to write file {display_path}: {exc!r}", "resolved_path": str(CHEATSHEET_PATH)}
+    return {
+        "path": display_path,
+        "resolved_path": str(CHEATSHEET_PATH),
+        "status": "ok",
+        "mode": mode,
+        "message": f"Wrote {len(content)} chars to {display_path}",
+    }
+
+
+def edit_dynamic_cheatsheet(
+    display_path: str,
+    search_block: str,
+    replace_block: str,
+    replace_all: bool = False,
+):
+    if not CHEATSHEET_PATH.exists():
+        return {"error": f"File does not exist: {display_path}", "resolved_path": str(CHEATSHEET_PATH)}
+
+    try:
+        file_content = CHEATSHEET_PATH.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return {"error": f"Failed to read file {display_path}: {exc!r}", "resolved_path": str(CHEATSHEET_PATH)}
+
+    if search_block not in file_content:
+        return {"error": "Search block not found.", "path": display_path, "resolved_path": str(CHEATSHEET_PATH)}
+
+    count = file_content.count(search_block)
+    new_content = (
+        file_content.replace(search_block, replace_block)
+        if replace_all
+        else file_content.replace(search_block, replace_block, 1)
+    )
+    try:
+        CHEATSHEET_PATH.write_text(new_content, encoding="utf-8")
+    except Exception as exc:
+        return {"error": f"Failed to edit file {display_path}: {exc!r}", "resolved_path": str(CHEATSHEET_PATH)}
+
+    return {
+        "path": display_path,
+        "resolved_path": str(CHEATSHEET_PATH),
+        "status": "ok",
+        "replacements": count if replace_all else 1,
+        "available_matches": count,
+        "message": "Edit applied successfully.",
+    }
+
+
+def enable_dynamic_cheatsheet_access(tools: list) -> None:
+    for tool in tools:
+        if tool.name == "read_file":
+            tool.description += " Special case: path='cheatsheet.md' reads the shared dynamic cheatsheet."
+            path_desc = tool.parameters["properties"]["path"]["description"]
+            tool.parameters["properties"]["path"]["description"] = (
+                f"{path_desc} You may also pass 'cheatsheet.md' to access the shared dynamic cheatsheet."
+            )
+
+            def read_file_run(
+                path: str,
+                max_chars: int = 4000,
+                start_line: int | None = None,
+                end_line: int | None = None,
+                start_marker: str | None = None,
+                end_marker: str | None = None,
+                _original_run=tool.run,
+                _pipeline=tool.file_pipeline,
+            ):
+                cheatsheet_path = resolve_dynamic_cheatsheet_path(path)
+                if cheatsheet_path is not None:
+                    return read_dynamic_cheatsheet(
+                        display_path=path,
+                        max_chars=max_chars,
+                        start_line=start_line,
+                        end_line=end_line,
+                        start_marker=start_marker,
+                        end_marker=end_marker,
+                        pipeline=_pipeline,
+                    )
+                return _original_run(
+                    path=path,
+                    max_chars=max_chars,
+                    start_line=start_line,
+                    end_line=end_line,
+                    start_marker=start_marker,
+                    end_marker=end_marker,
+                )
+
+            tool.run = read_file_run
+
+        elif tool.name == "write_file":
+            tool.description += " Special case: path='cheatsheet.md' is also allowed for the shared dynamic cheatsheet."
+            path_desc = tool.parameters["properties"]["path"]["description"]
+            tool.parameters["properties"]["path"]["description"] = (
+                f"{path_desc} Exception: 'cheatsheet.md' is also allowed when dynamic cheatsheet access is enabled."
+            )
+
+            def write_file_run(
+                path: str,
+                content: str,
+                overwrite: bool = True,
+                _original_run=tool.run,
+            ):
+                cheatsheet_path = resolve_dynamic_cheatsheet_path(path)
+                if cheatsheet_path is not None:
+                    return write_dynamic_cheatsheet(path, content, overwrite=overwrite)
+                return _original_run(path=path, content=content, overwrite=overwrite)
+
+            tool.run = write_file_run
+
+        elif tool.name == "edit_file":
+            tool.description += " Special case: path='cheatsheet.md' is also allowed for the shared dynamic cheatsheet."
+            path_desc = tool.parameters["properties"]["path"]["description"]
+            tool.parameters["properties"]["path"]["description"] = (
+                f"{path_desc} Exception: 'cheatsheet.md' is also allowed when dynamic cheatsheet access is enabled."
+            )
+
+            def edit_file_run(
+                path: str,
+                search_block: str,
+                replace_block: str,
+                replace_all: bool = False,
+                _original_run=tool.run,
+            ):
+                cheatsheet_path = resolve_dynamic_cheatsheet_path(path)
+                if cheatsheet_path is not None:
+                    return edit_dynamic_cheatsheet(
+                        display_path=path,
+                        search_block=search_block,
+                        replace_block=replace_block,
+                        replace_all=replace_all,
+                    )
+                return _original_run(
+                    path=path,
+                    search_block=search_block,
+                    replace_block=replace_block,
+                    replace_all=replace_all,
+                )
+
+            tool.run = edit_file_run
 
 
 def load_blocked_gt_xml_filenames() -> set[str]:
@@ -271,6 +518,7 @@ def main() -> None:
     parser.add_argument("--disable-compress-tool", action="store_true")
     parser.add_argument("--disable-prompt-caching", action="store_true")
     parser.add_argument("--prompt-cache-ttl", choices=("default", "1h"), default="default")
+    parser.add_argument("--allow-dynamic-cheatsheet-access", action="store_true")
     args = parser.parse_args()
 
     workspace_root = Path(args.workspace).resolve()
@@ -279,6 +527,8 @@ def main() -> None:
     disabled_tools = {"run_geos", "run_shell", "run_python_code"}
     tools = [tool for tool in build_default_tools(workspace_root) if tool.name not in disabled_tools]
     restrict_reference_access(tools, blocked_xml_filenames, blocked_rst_paths)
+    if args.allow_dynamic_cheatsheet_access:
+        enable_dynamic_cheatsheet_access(tools)
 
     config = AgentConfig(
         model=args.model,
@@ -304,6 +554,8 @@ def main() -> None:
         config=config,
     )
     agent.system_prompt = sanitize_system_prompt(agent.system_prompt)
+    if args.allow_dynamic_cheatsheet_access:
+        agent.system_prompt = append_dynamic_cheatsheet_instructions(agent.system_prompt)
 
     try:
         agent.run(args.instruction)
@@ -405,6 +657,7 @@ async def run_experiment(
     retry_backoff: float,
     jsonl_log_dir: Path = None,
     eval_preamble: str = None,
+    allow_dynamic_cheatsheet_access: bool = False,
 ) -> Tuple[str, bool, float]:
     """Run a single experiment and return (name, success, duration_seconds)."""
     async with semaphore:
@@ -421,6 +674,8 @@ async def run_experiment(
         instructions = instructions_file.read_text(encoding="utf-8").strip()
         if eval_preamble:
             instructions = eval_preamble.strip() + "\n\n" + instructions
+        if allow_dynamic_cheatsheet_access:
+            instructions = DYNAMIC_CHEATSHEET_INSTRUCTION_PREAMBLE.strip() + "\n\n" + instructions
 
         cmd = [
             "uv", "run", "python", "-c", NO_GEOS_AGENT_CODE,
@@ -436,6 +691,8 @@ async def run_experiment(
         if jsonl_log_dir:
             jsonl_log_file = jsonl_log_dir / f"{experiment_name}.jsonl"
             cmd.extend(["--log", str(jsonl_log_file)])
+        if allow_dynamic_cheatsheet_access:
+            cmd.append("--allow-dynamic-cheatsheet-access")
 
         print(f"{Colors.OKCYAN}▶ Starting: {experiment_name}{Colors.ENDC}")
         start_time = asyncio.get_event_loop().time()
@@ -456,6 +713,7 @@ async def run_experiment(
                 f.write(f"Max steps: {max_steps}\n")
                 f.write("Runner mode: no run_geos tool\n")
                 f.write("Disabled tools: run_geos, run_shell, run_python_code\n")
+                f.write(f"Dynamic cheatsheet access: {allow_dynamic_cheatsheet_access}\n")
                 f.write(f"Blocked GT XML basenames ({len(blocked_xml_filenames)}): ")
                 f.write(json.dumps(blocked_xml_filenames))
                 f.write("\n")
@@ -515,6 +773,7 @@ async def run_all_experiments(
     jsonl_log_dir: Path = None,
     experiment_filter: List[str] = None,
     eval_preamble: str = None,
+    allow_dynamic_cheatsheet_access: bool = False,
 ):
     """Run all experiments concurrently with limited parallelism."""
     experiment_dirs = [
@@ -533,6 +792,7 @@ async def run_all_experiments(
     print(f"Max workers: {max_workers}")
     print(f"Model: {model}")
     print(f"Max steps: {max_steps}")
+    print(f"Dynamic cheatsheet access: {allow_dynamic_cheatsheet_access}")
     print(f"Ground truth directory: {ground_truth_dir}")
     print(f"Stdout/stderr logs: {log_dir}")
     if jsonl_log_dir:
@@ -555,6 +815,7 @@ async def run_all_experiments(
             retry_backoff,
             jsonl_log_dir,
             eval_preamble,
+            allow_dynamic_cheatsheet_access,
         )
         for exp_dir in experiment_dirs
     ]
@@ -682,6 +943,11 @@ def main():
         default=None,
         help="Custom eval preamble text (overrides the default)",
     )
+    parser.add_argument(
+        "--allow-dynamic-cheatsheet-access",
+        action="store_true",
+        help="Allow the agent to read/write/edit the shared cheatsheet via path 'cheatsheet.md'.",
+    )
 
     args = parser.parse_args()
 
@@ -728,6 +994,7 @@ def main():
             jsonl_log_dir=args.jsonl_log_dir,
             experiment_filter=args.experiments,
             eval_preamble=eval_preamble,
+            allow_dynamic_cheatsheet_access=args.allow_dynamic_cheatsheet_access,
         )
     )
 
