@@ -15,12 +15,14 @@ dependencies = [
     "python-multipart>=0.0.9",
     "streamlit>=1.45.0",
     "lxml>=5.0.0",
+    "python-telegram-bot>=21.0",
 ]
 
 [project.scripts]
 # geos-agent = "geos_agent.tools.tools:main"
 geos-agent = "geos_agent.main:main"
 geos-agent-gui = "geos_agent.gui_runner:main"
+geos-telegram = "geos_telegram.bot:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
