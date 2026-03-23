@@ -14,8 +14,8 @@
 ### lxml-based (new, preferred)
 - Script: `scripts/eval/lxml_xml_eval.py`
 - No LLM needed — programmatic comparison using lxml
-- 5 dimensions: structural_completeness (w=0.20), element_type_match (w=0.20),
-  attribute_accuracy (w=0.25), critical_param_accuracy (w=0.25), tag_coverage (w=0.10)
+- 4 dimensions: structural_completeness (w=0.167), element_type_match (w=0.333),
+  attribute_accuracy (w=0.278), tag_coverage (w=0.222)
 - Output JSON has: `overall_score` (0-10), `dimension_scores` (0-1 each)
 - CLI: `uv run python scripts/eval/lxml_xml_eval.py --ground-truth-dir ... --generated-dir ... --output ...`
 

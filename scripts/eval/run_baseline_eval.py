@@ -410,7 +410,7 @@ def print_summary(results: list[dict]) -> None:
 
         # Dimension averages
         dims = ["structural_completeness", "element_type_match",
-                "attribute_accuracy", "critical_param_accuracy", "tag_coverage"]
+                "attribute_accuracy", "tag_coverage"]
         print(f"\n  {C.BOLD}Average dimension scores:{C.ENDC}")
         for d in dims:
             vals = [r["dimension_scores"][d] for r in successful if "dimension_scores" in r]

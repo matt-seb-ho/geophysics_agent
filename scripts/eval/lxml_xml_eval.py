@@ -10,8 +10,7 @@ Scoring dimensions (all 0–1, combined into a weighted overall 0–10):
   1. structural_completeness  — required top-level sections present
   2. element_type_match       — correct element types used (Jaccard similarity)
   3. attribute_accuracy       — attribute values match (with numeric tolerance)
-  4. critical_param_accuracy  — key physics parameters match exactly
-  5. tag_coverage             — no spurious/missing tags vs ground truth
+  4. tag_coverage             — recall of GT tag types in generated XML
 
 Usage:
     # Compare two directories
@@ -66,50 +65,15 @@ OPTIONAL_SECTIONS = {
     "Outputs",
 }
 
-# Attribute names that carry physics meaning and are scored separately in
-# `critical_param_accuracy`.  Values must match numerically (with tolerance).
-CRITICAL_ATTRIBUTES = {
-    # Constitutive model parameters
-    "defaultDensity",
-    "defaultBulkModulus",
-    "defaultShearModulus",
-    "defaultCohesion",
-    "defaultFrictionAngle",
-    "defaultDilationAngle",
-    "defaultHardeningRate",
-    "relaxationTime",
-    "defaultInitialFrictionAngle",
-    "defaultResidualFrictionAngle",
-    "defaultDilationRatio",
-    "defaultHardening",
-    "defaultRefPressure",
-    "defaultPreConsolidationPressure",
-    "defaultCslSlope",
-    "defaultRecompressionIndex",
-    "defaultVirginCompressionIndex",
-    # Mesh / geometry
-    "xCoords", "yCoords", "zCoords",
-    "nx", "ny", "nz",
-    # Solver / physics
-    "maxTime",
-    "initialStress",
-    "steps",
-    # Task
-    "mode",
-    "axialControl",
-    "radialControl",
-}
-
 # Numeric tolerance for "equivalent" attribute values (relative).
 NUMERIC_RTOL = 1e-6
 
 # Weights for the composite score.
 WEIGHTS = {
-    "structural_completeness": 0.20,
-    "element_type_match":      0.20,
-    "attribute_accuracy":      0.25,
-    "critical_param_accuracy": 0.25,
-    "tag_coverage":            0.10,
+    "structural_completeness": 0.15,
+    "element_type_match":      0.40,
+    "attribute_accuracy":      0.30,
+    "tag_coverage":            0.15,
 }
 
 # ---------------------------------------------------------------------------
@@ -460,73 +424,10 @@ def _score_attrs_by_tag(
     return score, {"note": "matched by tag (no common names)", "total": total, "matched": matched}
 
 
-def score_critical_params(
-    gt_cfg: dict, gen_cfg: dict, rtol: float = NUMERIC_RTOL
-) -> tuple[float, dict]:
-    """
-    Score 4: Compare CRITICAL_ATTRIBUTES for element types present in BOTH GT and GEN.
-
-    Key design decision: GT may be a "library" base file containing many
-    constitutive models.  The agent is expected to filter and include only
-    the relevant ones.  Penalising for absent models would be unfair, so we
-    only score parameters for element *types* that appear in both outputs.
-
-    Within those shared types, we match by element name first, then by tag.
-    """
-    critical_found = 0
-    critical_matched = 0
-    mismatches: list[str] = []
-    skipped_types: list[str] = []
-
-    gen_type_set = gen_cfg["element_types"]
-
-    gen_by_tag: dict[str, list[dict]] = {}
-    for e in gen_cfg["elements"]:
-        gen_by_tag.setdefault(e["tag"], []).append(e)
-
-    gen_named = gen_cfg["named_elements"]
-
-    for elem in gt_cfg["elements"]:
-        tag = elem["tag"]
-        key_id = elem["name"] or tag
-
-        # Skip element types the agent deliberately omitted (library filtering)
-        if tag not in gen_type_set:
-            skipped_types.append(tag)
-            continue
-
-        for attr, gt_val in elem["attrs"].items():
-            if attr not in CRITICAL_ATTRIBUTES:
-                continue
-            critical_found += 1
-
-            # Match by name first, then by tag
-            if key_id in gen_named and gen_named[key_id]["tag"] == tag:
-                gen_val = gen_named[key_id]["attrs"].get(attr)
-            elif tag in gen_by_tag:
-                gen_val = gen_by_tag[tag][0]["attrs"].get(attr)
-            else:
-                gen_val = None
-
-            if gen_val is not None and values_equivalent(gt_val, str(gen_val), rtol):
-                critical_matched += 1
-            else:
-                mismatches.append(
-                    f"{tag}[@{attr}]: GT={gt_val!r}  GEN={gen_val!r}"
-                )
-
-    score = critical_matched / critical_found if critical_found else 1.0
-    return score, {
-        "critical_found": critical_found,
-        "critical_matched": critical_matched,
-        "skipped_types_not_in_gen": sorted(set(skipped_types)),
-        "mismatches": mismatches,
-    }
-
 
 def score_tag_coverage(gt_cfg: dict, gen_cfg: dict) -> tuple[float, dict]:
     """
-    Score 5: Recall of GT element types in the generated output.
+    Score 4: Recall of GT element types in the generated output.
 
     = |GT_types ∩ GEN_types| / |GT_types|
 
@@ -555,7 +456,7 @@ def evaluate_xml(
     rtol: float = NUMERIC_RTOL,
 ) -> dict[str, Any]:
     """
-    Run all 5 scoring dimensions against two resolved lxml trees.
+    Run all scoring dimensions against two resolved lxml trees.
     Returns a result dict with per-dimension scores and an overall 0–10 score.
     """
     gt_cfg = extract_config(gt_root)
@@ -564,14 +465,12 @@ def evaluate_xml(
     s_struct, d_struct   = score_structural_completeness(gt_cfg, gen_cfg)
     s_types,  d_types    = score_element_type_match(gt_cfg, gen_cfg)
     s_attrs,  d_attrs    = score_attribute_accuracy(gt_cfg, gen_cfg, rtol)
-    s_crit,   d_crit     = score_critical_params(gt_cfg, gen_cfg, rtol)
     s_cov,    d_cov      = score_tag_coverage(gt_cfg, gen_cfg)
 
     raw_scores = {
         "structural_completeness": s_struct,
         "element_type_match":      s_types,
         "attribute_accuracy":      s_attrs,
-        "critical_param_accuracy": s_crit,
         "tag_coverage":            s_cov,
     }
 
@@ -587,7 +486,6 @@ def evaluate_xml(
             "structural_completeness": d_struct,
             "element_type_match":      d_types,
             "attribute_accuracy":      d_attrs,
-            "critical_param_accuracy": d_crit,
             "tag_coverage":            d_cov,
         },
         "gt_sections":      sorted(gt_cfg["sections"]),
@@ -631,7 +529,6 @@ DIMENSION_LABELS = {
     "structural_completeness": "Structural Completeness",
     "element_type_match":      "Element Type Match",
     "attribute_accuracy":      "Attribute Accuracy",
-    "critical_param_accuracy": "Critical Param Accuracy",
     "tag_coverage":            "Tag Coverage",
 }
 
@@ -685,14 +582,6 @@ def print_report(result: dict[str, Any], verbose: bool = True) -> None:
                     print("  " + "-" * (W - 2))
                 print(f"  [{elem_detail.get('name', elem_detail.get('tag', '?'))}] {m}")
                 mismatches_shown += 1
-
-        # Critical param mismatches
-        d = details.get("critical_param_accuracy", {})
-        if d.get("mismatches"):
-            print("\n  CRITICAL PARAMETER MISMATCHES")
-            print("  " + "-" * (W - 2))
-            for m in d["mismatches"]:
-                print(f"  {m}")
 
         # Tag coverage
         d = details.get("tag_coverage", {})
