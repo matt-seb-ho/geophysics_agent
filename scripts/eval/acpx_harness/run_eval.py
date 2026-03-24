@@ -53,9 +53,12 @@ To evaluate results afterwards, use batch_lxml_evaluate.py:
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -66,7 +69,10 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
 EXPERIMENTS_DIR = Path("/home/brianliu/data/eval/experiments")
+GROUND_TRUTH_DIR = Path("/home/brianliu/data/eval/experiments_gt")
 GEOS_LIB_DIR = Path("/home/brianliu/data/GEOS")
+# Temp copies of GEOS live here (same filesystem as GEOS_LIB_DIR so hardlinks work)
+TEMP_GEOS_PARENT = Path("/home/brianliu/data/eval/tmp_geos")
 DOCKER_IMAGE = "geos-eval"
 
 # ---------------------------------------------------------------------------
@@ -122,6 +128,89 @@ def build_prompt(agents_context: str, task_instructions: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Restriction helpers (mirrors run_experiments_no_geos_parallel.py pattern)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Filtered GEOS copy
+#
+# Creates a per-task hardlinked copy of GEOS_LIB_DIR with restricted files
+# removed.  Hardlinks are instantaneous and use no extra disk space when both
+# paths are on the same filesystem (TEMP_GEOS_PARENT should live under the
+# same mount as GEOS_LIB_DIR).  Falls back to a real copy if they differ.
+# ---------------------------------------------------------------------------
+
+def collect_ground_truth_xml_filenames(gt_experiment_dir: Path) -> list[str]:
+    """Return sorted list of XML basenames under one ground-truth experiment directory."""
+    if not gt_experiment_dir.exists():
+        return []
+    return sorted({p.name.lower() for p in gt_experiment_dir.rglob("*.xml") if p.is_file()})
+
+
+def create_filtered_geos_copy(
+    geos_src: Path,
+    blocked_xml_basenames: set[str],
+    tmp_parent: Path,
+    blocked_rst_relpaths: set[str] | None = None,
+) -> Path:
+    """Hardlink-copy geos_src into a fresh temp dir, omitting blocked files.
+
+    Returns the path of the copy (suitable for use as a Docker bind-mount
+    source).  Its parent directory should be passed to cleanup_filtered_geos_copy
+    when the experiment finishes.
+
+    Args:
+        geos_src: Original GEOS library directory.
+        blocked_xml_basenames: Lowercased XML basenames to exclude (e.g. 'deadoil_base.xml').
+        tmp_parent: Directory under which the temp copy is created.  Should be
+            on the same filesystem as geos_src for hardlinks to work.
+        blocked_rst_relpaths: Optional set of GEOS-relative RST paths to exclude
+            (e.g. 'src/docs/sphinx/basicExamples/multiphaseFlow/Example.rst').
+    """
+    tmp_parent.mkdir(parents=True, exist_ok=True)
+    # mkdtemp creates the unique parent dir; copytree fills geos/ inside it.
+    tmp_dir = Path(tempfile.mkdtemp(dir=tmp_parent, prefix="geos_eval_"))
+    geos_dest = tmp_dir / "geos"
+
+    blocked_xml_lower = {n.lower() for n in blocked_xml_basenames}
+    blocked_rst_lower = {p.replace("\\", "/").lower() for p in (blocked_rst_relpaths or set())}
+
+    def _ignore(src_dir: str, names: list[str]) -> set[str]:
+        skipped: set[str] = set()
+        for name in names:
+            if name.lower() in blocked_xml_lower:
+                skipped.add(name)
+                continue
+            if blocked_rst_lower:
+                try:
+                    rel = (Path(src_dir) / name).relative_to(geos_src)
+                    if str(rel).replace("\\", "/").lower() in blocked_rst_lower:
+                        skipped.add(name)
+                except ValueError:
+                    pass
+        return skipped
+
+    def _hardlink_or_copy(src: str, dst: str) -> None:
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
+
+    shutil.copytree(
+        geos_src, geos_dest,
+        ignore=_ignore,
+        copy_function=_hardlink_or_copy,
+        symlinks=True,
+    )
+    return geos_dest
+
+
+def cleanup_filtered_geos_copy(geos_copy: Path) -> None:
+    """Remove the temp directory created by create_filtered_geos_copy."""
+    shutil.rmtree(geos_copy.parent, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
 # Per-task runner
 # ---------------------------------------------------------------------------
 
@@ -133,6 +222,7 @@ def run_task(
     run_name: str,
     timeout: int,
     dry_run: bool,
+    ground_truth_dir: Path | None = None,
 ) -> dict:
     agent = AGENTS[agent_key]
     task_dir = experiments_dir / task_name
@@ -145,6 +235,28 @@ def run_task(
     task_instructions = load_task_instructions(task_dir)
     prompt = build_prompt(agents_context, task_instructions)
 
+    # Collect blocked GT XML filenames for this experiment
+    blocked_xml_filenames: list[str] = []
+    if ground_truth_dir is not None:
+        gt_experiment_dir = ground_truth_dir / task_name
+        blocked_xml_filenames = collect_ground_truth_xml_filenames(gt_experiment_dir)
+
+    # Create a per-task filtered copy of GEOS with blocked files excluded.
+    # This is the primary enforcement mechanism for file-read restrictions: the
+    # files simply don't exist in the agent's /geos_lib mount.
+    filtered_geos = create_filtered_geos_copy(
+        geos_src=GEOS_LIB_DIR,
+        blocked_xml_basenames=set(blocked_xml_filenames),
+        tmp_parent=TEMP_GEOS_PARENT,
+    )
+
+    # claude_code: also install a PreToolUse hook to block Bash-based GEOS execution.
+    # cursor: fall back to a prompt-level instruction for no_run_geos only.
+    if agent["acpx_name"] == "claude":
+        install_claude_code_hooks(result_dir)
+    elif no_run_geos:
+        prompt = prompt + "\n" + build_no_run_geos_prompt_suffix()
+
     model = agent.get("model")
     api_key = os.environ.get(agent["api_key_env"], "")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -155,13 +267,14 @@ def run_task(
         prompt = f"/model {model}\n\n{prompt}"
 
     extra_env: list[str] = []
-    # Also pass CURSOR_MODEL env var in case the cursor CLI honours it at startup.
     if model and agent["acpx_name"] == "cursor":
-        extra_env = ["-e", f"CURSOR_MODEL={model}"]
+        extra_env += ["-e", f"CURSOR_MODEL={model}"]
+    if agent["acpx_name"] == "claude":
+        extra_env += ["-e", f"EVAL_NO_RUN_GEOS={'1' if no_run_geos else '0'}"]
 
     cmd = [
         "docker", "run", "--rm",
-        "-v", f"{GEOS_LIB_DIR}:/geos_lib:ro",
+        "-v", f"{filtered_geos}:/geos_lib:ro",
         "-v", f"{result_dir}:/workspace:rw",
         "-e", f"{agent['api_key_env']}={api_key}",
         "-e", f"ANTHROPIC_API_KEY={anthropic_key}",
@@ -176,10 +289,26 @@ def run_task(
     ]
 
     if dry_run:
-        # Print a truncated command for inspection
+        cleanup_filtered_geos_copy(filtered_geos)
         display = " ".join(cmd[:12]) + " ..."
         print(f"  [DRY RUN] {display}")
         return {"task": task_name, "agent": agent_key, "status": "dry_run"}
+
+    # Write a metadata file so the run config is auditable
+    (result_dir / "eval_metadata.json").write_text(
+        json.dumps(
+            {
+                "task": task_name,
+                "agent": agent_key,
+                "run_name": run_name,
+                "no_run_geos": no_run_geos,
+                "blocked_gt_xml_filenames": blocked_xml_filenames,
+                "filtered_geos_copy": str(filtered_geos),
+                "started": datetime.now().isoformat(),
+            },
+            indent=2,
+        )
+    )
 
     try:
         proc = subprocess.run(
@@ -209,6 +338,9 @@ def run_task(
         (result_dir / "exit_code.txt").write_text("error")
         (result_dir / "stderr.txt").write_text(str(exc))
         return {"task": task_name, "agent": agent_key, "status": "error", "error": str(exc)}
+
+    finally:
+        cleanup_filtered_geos_copy(filtered_geos)
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +414,31 @@ def main() -> None:
         action="store_true",
         help="Print docker commands without executing",
     )
+    parser.add_argument(
+        "--no-run-geos",
+        action="store_true",
+        help="Append a prompt constraint that forbids the agent from executing GEOS simulations. "
+             "Mirrors the run_geos/run_shell removal in run_experiments_no_geos_parallel.py.",
+    )
+    parser.add_argument(
+        "--ground-truth-dir",
+        type=Path,
+        default=GROUND_TRUTH_DIR,
+        metavar="DIR",
+        help=f"Directory containing per-task ground-truth subdirs whose XML filenames "
+             f"will be blocked from the agent. Pass an empty string to disable. "
+             f"(default: {GROUND_TRUTH_DIR})",
+    )
     args = parser.parse_args()
+
+    # Normalise ground-truth-dir: treat missing or empty-string as None
+    ground_truth_dir: Path | None = args.ground_truth_dir
+    if ground_truth_dir is not None and not ground_truth_dir.exists():
+        print(
+            f"{C.WARNING}Warning: --ground-truth-dir '{ground_truth_dir}' does not exist; "
+            f"GT XML blocking disabled.{C.ENDC}"
+        )
+        ground_truth_dir = None
 
     experiments_dir: Path = args.experiments_dir
 
@@ -332,6 +488,8 @@ def main() -> None:
     print(f"  Timeout        : {args.timeout}s per task")
     print(f"  Workers        : {args.workers}")
     print(f"  Dry run        : {args.dry_run}")
+    print(f"  No run geos    : {args.no_run_geos}")
+    print(f"  GT XML blocking: {ground_truth_dir or 'disabled'}")
     for agent_key, path in result_paths.items():
         print(f"  Results ({agent_key}): {path}")
     print(f"  Started        : {datetime.now().isoformat()}")
@@ -343,7 +501,8 @@ def main() -> None:
         futures = {
             executor.submit(
                 run_task, task, agent, agents_context,
-                experiments_dir, args.run, args.timeout, args.dry_run
+                experiments_dir, args.run, args.timeout, args.dry_run,
+                ground_truth_dir, args.no_run_geos,
             ): (task, agent)
             for task, agent in combos
         }
