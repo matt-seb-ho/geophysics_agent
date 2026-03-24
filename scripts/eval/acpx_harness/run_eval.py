@@ -250,13 +250,6 @@ def run_task(
         tmp_parent=TEMP_GEOS_PARENT,
     )
 
-    # claude_code: also install a PreToolUse hook to block Bash-based GEOS execution.
-    # cursor: fall back to a prompt-level instruction for no_run_geos only.
-    if agent["acpx_name"] == "claude":
-        install_claude_code_hooks(result_dir)
-    elif no_run_geos:
-        prompt = prompt + "\n" + build_no_run_geos_prompt_suffix()
-
     model = agent.get("model")
     api_key = os.environ.get(agent["api_key_env"], "")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -269,8 +262,6 @@ def run_task(
     extra_env: list[str] = []
     if model and agent["acpx_name"] == "cursor":
         extra_env += ["-e", f"CURSOR_MODEL={model}"]
-    if agent["acpx_name"] == "claude":
-        extra_env += ["-e", f"EVAL_NO_RUN_GEOS={'1' if no_run_geos else '0'}"]
 
     cmd = [
         "docker", "run", "--rm",
@@ -301,7 +292,6 @@ def run_task(
                 "task": task_name,
                 "agent": agent_key,
                 "run_name": run_name,
-                "no_run_geos": no_run_geos,
                 "blocked_gt_xml_filenames": blocked_xml_filenames,
                 "filtered_geos_copy": str(filtered_geos),
                 "started": datetime.now().isoformat(),
@@ -415,12 +405,6 @@ def main() -> None:
         help="Print docker commands without executing",
     )
     parser.add_argument(
-        "--no-run-geos",
-        action="store_true",
-        help="Append a prompt constraint that forbids the agent from executing GEOS simulations. "
-             "Mirrors the run_geos/run_shell removal in run_experiments_no_geos_parallel.py.",
-    )
-    parser.add_argument(
         "--ground-truth-dir",
         type=Path,
         default=GROUND_TRUTH_DIR,
@@ -488,7 +472,6 @@ def main() -> None:
     print(f"  Timeout        : {args.timeout}s per task")
     print(f"  Workers        : {args.workers}")
     print(f"  Dry run        : {args.dry_run}")
-    print(f"  No run geos    : {args.no_run_geos}")
     print(f"  GT XML blocking: {ground_truth_dir or 'disabled'}")
     for agent_key, path in result_paths.items():
         print(f"  Results ({agent_key}): {path}")
@@ -502,7 +485,7 @@ def main() -> None:
             executor.submit(
                 run_task, task, agent, agents_context,
                 experiments_dir, args.run, args.timeout, args.dry_run,
-                ground_truth_dir, args.no_run_geos,
+                ground_truth_dir,
             ): (task, agent)
             for task, agent in combos
         }
