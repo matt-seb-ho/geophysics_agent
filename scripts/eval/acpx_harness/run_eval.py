@@ -511,8 +511,8 @@ def main() -> None:
         print(f"\n{C.FAIL}Failed tasks:{C.ENDC}")
         for r in results:
             if r["status"] not in ("success", "dry_run"):
-                print(f"  [{r['status']}] {r['agent']} / {r['task']}"
-                      + (f": {r.get('error', '')}" if r.get("error") else ""))
+                error_text = f": {r.get('error', '')}" if r.get("error") else ""
+                print(f"  [{r['status']}] {r['agent']} / {r['task']}{error_text}")
 
 
 if __name__ == "__main__":
