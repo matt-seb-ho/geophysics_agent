@@ -63,16 +63,24 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR = Path(__file__).parent
-EXPERIMENTS_DIR = Path("/home/brianliu/data/eval/experiments")
-GROUND_TRUTH_DIR = Path("/home/brianliu/data/eval/experiments_gt")
-GEOS_LIB_DIR = Path("/home/brianliu/data/GEOS")
+REPO_ROOT = SCRIPT_DIR.parent.parent.parent
+DATA_DIR = REPO_ROOT / "data"
+EXPERIMENTS_DIR = DATA_DIR / "eval" / "experiments"
+GROUND_TRUTH_DIR = DATA_DIR / "eval" / "experiments_gt"
+GEOS_LIB_DIR = DATA_DIR / "GEOS"
 # Temp copies of GEOS live here (same filesystem as GEOS_LIB_DIR so hardlinks work)
-TEMP_GEOS_PARENT = Path("/home/brianliu/data/eval/tmp_geos")
+TEMP_GEOS_PARENT = DATA_DIR / "eval" / "tmp_geos"
 DOCKER_IMAGE = "geos-eval"
 
 # ---------------------------------------------------------------------------
@@ -85,13 +93,13 @@ DOCKER_IMAGE = "geos-eval"
 AGENTS: dict[str, dict] = {
     "claude_code": {
         "acpx_name": "claude",
-        "results_dir": Path("/home/brianliu/data/eval/claude_code"),
+        "results_dir": DATA_DIR / "eval" / "claude_code",
         "api_key_env": "ANTHROPIC_API_KEY",
         "model": None,  # passed via ANTHROPIC_API_KEY; model set by claude itself
     },
     "cursor_composer2": {
         "acpx_name": "cursor",
-        "results_dir": Path("/home/brianliu/data/eval/cursor_composer2"),
+        "results_dir": DATA_DIR / "eval" / "cursor_composer2",
         "api_key_env": "CURSOR_API_KEY",
         "model": "composer-2",
     },
