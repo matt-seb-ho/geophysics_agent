@@ -20,6 +20,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 
 # Install cursor-agent
 RUN curl -fsSL https://cursor.com/install | bash
+ENV PATH="/root/.local/bin:${PATH}"
 
 # Install Claude Code (claude CLI)
 RUN npm install -g @anthropic-ai/claude-code
