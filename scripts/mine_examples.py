@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -15,6 +16,9 @@ from geos_agent.api_client import OpenRouterClient, RetryConfig
 load_dotenv()
 
 # extract examples from .rst sphinx doc files
+
+
+XmlFileBundle = List[Dict[str, str]]
 
 
 # ---------- Data structures ----------
@@ -44,6 +48,8 @@ class ExampleGroundTruth:
     
     # Full XML content for ground truth comparison
     xml_content: str  # Complete XML file contents
+    ground_truth_experiment: str  # Matched directory under data/eval/experiments_gt
+    ground_truth_xml_files: List[str]  # XML files read from the matched inputs/ dir
 
     # Ground truth "code" the agent should recover
     input_files: List[str]  # XML decks and any other required inputs
@@ -198,6 +204,110 @@ def _extract_data_paths(xml_content: str) -> List[str]:
     return sorted(list(set(paths)))
 
 
+def _clean_experiment_name(value: str) -> str:
+    """Match the experiment folder naming used by scripts/eval/generate_experiments.py."""
+    return re.sub(r"[^a-zA-Z0-9]", "", value)
+
+
+def _candidate_experiment_names(title: str, example_name: str) -> List[str]:
+    candidates = []
+
+    cleaned_title = _clean_experiment_name(title)
+    if cleaned_title:
+        candidates.append(cleaned_title)
+
+    if example_name and example_name != "unknown":
+        candidates.extend(
+            [
+                example_name,
+                f"Example{example_name[:1].upper()}{example_name[1:]}",
+                f"Tutorial{example_name[:1].upper()}{example_name[1:]}",
+                f"AdvancedExample{example_name[:1].upper()}{example_name[1:]}",
+            ]
+        )
+
+    return list(dict.fromkeys(candidates))
+
+
+def _find_ground_truth_experiment_dir(
+    ground_truth_dir: Optional[Path],
+    title: str,
+    example_name: str,
+) -> Optional[Path]:
+    if ground_truth_dir is None or not ground_truth_dir.is_dir():
+        return None
+
+    for candidate in _candidate_experiment_names(title, example_name):
+        direct_match = ground_truth_dir / candidate
+        if direct_match.is_dir():
+            return direct_match
+
+    casefolded = {
+        child.name.casefold(): child
+        for child in ground_truth_dir.iterdir()
+        if child.is_dir()
+    }
+    for candidate in _candidate_experiment_names(title, example_name):
+        match = casefolded.get(candidate.casefold())
+        if match is not None:
+            return match
+
+    return None
+
+
+def _read_ground_truth_xml_files(
+    experiment_dir: Optional[Path],
+) -> XmlFileBundle:
+    if experiment_dir is None:
+        return []
+
+    inputs_dir = experiment_dir / "inputs"
+    if not inputs_dir.is_dir():
+        return []
+
+    xml_files: XmlFileBundle = []
+    for xml_path in sorted(inputs_dir.rglob("*.xml")):
+        try:
+            xml_files.append(
+                {
+                    "path": xml_path.relative_to(experiment_dir).as_posix(),
+                    "content": xml_path.read_text(encoding="utf-8"),
+                }
+            )
+        except UnicodeDecodeError:
+            xml_files.append(
+                {
+                    "path": xml_path.relative_to(experiment_dir).as_posix(),
+                    "content": xml_path.read_text(encoding="latin-1"),
+                }
+            )
+
+    return xml_files
+
+
+def _format_xml_bundle(xml_files: XmlFileBundle) -> str:
+    sections = []
+    for xml_file in xml_files:
+        sections.append(
+            f"--- {xml_file['path']} ---\n"
+            "```xml\n"
+            f"{xml_file['content']}\n"
+            "```"
+        )
+    return "\n\n".join(sections)
+
+
+def _combine_xml_content(xml_files: XmlFileBundle) -> str:
+    if not xml_files:
+        return ""
+    return "\n\n".join(
+        f"<!-- BEGIN {xml_file['path']} -->\n"
+        f"{xml_file['content']}\n"
+        f"<!-- END {xml_file['path']} -->"
+        for xml_file in xml_files
+    )
+
+
 def _extract_run_commands(text: str) -> List[str]:
     cmds = []
     for line in text.splitlines():
@@ -214,11 +324,15 @@ def _extract_run_commands(text: str) -> List[str]:
 
 
 def generate_spec_with_llm(
-    rst_content: str, example_id: str, data_paths: Optional[List[str]] = None
+    rst_content: str,
+    example_id: str,
+    data_paths: Optional[List[str]] = None,
+    ground_truth_xml_files: Optional[XmlFileBundle] = None,
 ) -> str:
     """
-    Use Claude opus-4.5 thinking via OpenRouter to generate a comprehensive
-    natural language specification from the full RST documentation.
+    Use OpenRouter to generate a comprehensive natural language specification
+    from the full RST documentation and, when available, the exact ground-truth
+    XML files for the experiment.
     """
     # Use retry-enabled client with reasonable defaults for batch processing
     retry_config = RetryConfig(
@@ -231,26 +345,39 @@ def generate_spec_with_llm(
         retry_config=retry_config,
     )
 
-    prompt = f"""You are analyzing GEOS geophysics simulation documentation. Given the following RST documentation for an example, generate a comprehensive natural language specification that describes what XML configuration file a user would need to create.
+    prompt = f"""You are simulating a user's natural-language geophysics modeling request for an evaluation task. Another AI agent will receive only your final request and must recreate the same hidden reference inputs.
 
-The specification should:
-1. Describe the simulation type and physical problem being modeled
-2. List all required solver parameters and settings
-3. Specify mesh requirements (dimensions, cell sizes, element types)
-4. Detail material properties and constitutive models needed
-5. Describe initial and boundary conditions
-6. Include any numerical method specifications
-7. Note output requirements
-8. Explicitly list any external data files required, using the exact relative paths provided below (if any).
+The simulated user understands the geophysics domain and the physical modeling goal, but they do not know anything about GEOS. They do not know GEOS exists, do not know GEOS XML structure, do not know GEOS-specific object names, and do not know GEOS implementation concepts. Write as that user: describe what they want to simulate and what physical or numerical constraints matter, using only domain language.
 
-Be specific with numerical values where they appear in the documentation. Write as if you're giving instructions to an AI agent that will generate the XML file.
+Use the RST documentation as the explanatory source and the ground-truth XML files, when provided, as private reference material for exact numerical values, schedules, material parameters, mesh details, boundary/initial conditions, outputs, and file organization. Do not reveal that the reference material is XML or GEOS-specific.
 
-Do NOT include any XML code in your response - only natural language description.
+Write the final request in natural prose, as if a geoscientist or simulation engineer is asking someone else to build the simulation for them without specifying the software implementation. Organize it by the physical modeling story and what the user needs to simulate, not by the order, hierarchy, or grouping of the private reference files. A good response usually starts with the physical problem and goal, then naturally introduces the domain geometry, materials, operating conditions, constraints, time horizon, numerical fidelity needs, and outputs. Include exact numerical values and units wherever the sources provide them.
+
+Important style constraints:
+- Do not include XML code.
+- Do not include GEOS syntax.
+- Do not mention GEOS.
+- Do not mention XML.
+- Do not mention XML tag names, XML attribute names, XML object paths, or block-by-block instructions.
+- Do not mirror the ground-truth XML ordering or write a section-by-section implementation checklist.
+- Do not use headings that correspond to XML block order, such as solver, mesh, events, numerical methods, element regions, constitutive, field specifications, outputs, and tasks.
+- Do not say "set this parameter on this solver" or "create a Solvers/Mesh/Events block"; instead describe the scientific or simulation requirement that the model must satisfy.
+- Avoid GEOS-specific names unless they are also standard geophysics or numerical-method terminology. Prefer phrases like "poroelastic consolidation", "single-phase flow", "Drucker-Prager plasticity", "finite-volume flow discretization", or "hexahedral mesh" over GEOS implementation names.
+- If the reference uses multiple input files, describe the conceptual split only if it is natural for a domain user, for example "use a reusable base case and a benchmark case"; do not mention file formats, filenames, include mechanics, or software configuration mechanics unless a non-software external data file is truly part of the physical problem.
+- The output should be complete and self-contained enough for a capable simulation agent to recreate the hidden reference inputs, but it should read like a natural modeling request with constraints rather than an implementation walkthrough.
+- The final line of your response must be exactly: XML files to create: <comma-separated list of the exact XML filenames from the private reference files, without directory paths>. This is the only place where you may mention XML.
 
 Example ID: {example_id}
 
 RST Documentation:
 {rst_content}
+"""
+
+    if ground_truth_xml_files:
+        prompt += f"""
+
+Ground-Truth XML Files (private reference context; do not quote or reproduce as XML in your response):
+{_format_xml_bundle(ground_truth_xml_files)}
 """
 
     if data_paths:
@@ -265,7 +392,7 @@ Relevant Data Files (must be referenced by these exact paths):
 
     def _make_call():
         response = client.chat.completions.create(
-            model="moonshotai/kimi-k2.5",
+            model="google/gemini-3.1-pro-preview",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=100000,
             extra_body={"reasoning": {"enabled": True}},
@@ -282,6 +409,7 @@ def parse_example_rst(
     rst_path: Path,
     category: str,
     repo_root: Path,
+    ground_truth_dir: Optional[Path] = None,
 ) -> ExampleGroundTruth:
     """
     Parse a single Example.rst-like file into an ExampleGroundTruth object.
@@ -421,10 +549,20 @@ def parse_example_rst(
             example_name = parts[idx + 1]
 
     example_id = f"{category}/{example_name}"
+
+    gt_experiment_dir = _find_ground_truth_experiment_dir(
+        ground_truth_dir,
+        title,
+        example_name,
+    )
+    ground_truth_xml_files = _read_ground_truth_xml_files(gt_experiment_dir)
     
-    # Read the full XML content from the primary input file
+    # Read the full XML content from the matched eval ground truth when
+    # available. Fall back to the first XML referenced by the RST docs.
     xml_content = ""
-    if input_files:
+    if ground_truth_xml_files:
+        xml_content = _combine_xml_content(ground_truth_xml_files)
+    elif input_files:
         # Find the first .xml file and resolve it relative to repo_root
         for input_path in input_files:
             if input_path.endswith(".xml"):
@@ -440,12 +578,24 @@ def parse_example_rst(
     
     # Generate natural language spec using LLM
     print(f"  Generating LLM spec for {example_id}...")
+    if gt_experiment_dir is not None:
+        print(
+            f"    using ground truth: {gt_experiment_dir.name} "
+            f"({len(ground_truth_xml_files)} XML files)"
+        )
+    elif ground_truth_dir is not None:
+        print("    [warn] no matching ground truth directory found")
     
     # Extract data paths from XML content if available
     data_paths = _extract_data_paths(xml_content)
     
     try:
-        natural_language_spec = generate_spec_with_llm(full_text, example_id, data_paths)
+        natural_language_spec = generate_spec_with_llm(
+            full_text,
+            example_id,
+            data_paths,
+            ground_truth_xml_files,
+        )
     except Exception as e:
         print(f"  [warn] LLM call failed: {e}")
         natural_language_spec = ""
@@ -460,6 +610,8 @@ def parse_example_rst(
         description=description,
         natural_language_spec=natural_language_spec,
         xml_content=xml_content,
+        ground_truth_experiment=gt_experiment_dir.name if gt_experiment_dir else "",
+        ground_truth_xml_files=[xml_file["path"] for xml_file in ground_truth_xml_files],
         input_files=input_files,
         aux_files=aux_files,
         run_commands=run_commands,
@@ -490,24 +642,58 @@ def iter_example_rst_paths(
             yield path, "advanced"
 
 
-def iter_mined_examples(repo_root: Path) -> Iterable[ExampleGroundTruth]:
+def iter_mined_examples(
+    repo_root: Path,
+    ground_truth_dir: Optional[Path] = None,
+    num_workers: int = 1,
+) -> Iterable[ExampleGroundTruth]:
     """
     Generator that parses all GEOS example docs into structured ground truth.
     Yields one example at a time.
     """
-    for rst_path, category in iter_example_rst_paths(repo_root):
-        try:
-            ex = parse_example_rst(rst_path, category=category, repo_root=repo_root)
-            yield ex
-        except Exception as e:
-            # You can decide whether to raise or just log a warning.
-            # For now, we just print and skip.
-            print(f"[warn] Failed to parse {rst_path}: {e}")
+    example_paths = list(iter_example_rst_paths(repo_root))
+    if num_workers <= 1:
+        for rst_path, category in example_paths:
+            try:
+                ex = parse_example_rst(
+                    rst_path,
+                    category=category,
+                    repo_root=repo_root,
+                    ground_truth_dir=ground_truth_dir,
+                )
+                yield ex
+            except Exception as e:
+                # You can decide whether to raise or just log a warning.
+                # For now, we just print and skip.
+                print(f"[warn] Failed to parse {rst_path}: {e}")
+        return
+
+    print(f"Using {num_workers} workers for LLM spec generation")
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        future_to_rst = {
+            executor.submit(
+                parse_example_rst,
+                rst_path,
+                category=category,
+                repo_root=repo_root,
+                ground_truth_dir=ground_truth_dir,
+            ): rst_path
+            for rst_path, category in example_paths
+        }
+
+        for future in as_completed(future_to_rst):
+            rst_path = future_to_rst[future]
+            try:
+                yield future.result()
+            except Exception as e:
+                print(f"[warn] Failed to parse {rst_path}: {e}")
 
 
 def dump_examples_to_jsonl(
     repo_root: Path,
     out_path: Path,
+    ground_truth_dir: Optional[Path] = None,
+    num_workers: int = 1,
 ) -> None:
     """
     Create a JSONL file with all mined examples (one JSON object per line).
@@ -523,7 +709,7 @@ def dump_examples_to_jsonl(
     
     # Open with line buffering (buffering=1) so it flushes on newlines
     with open(out_path, "w", encoding="utf-8", buffering=1) as f:
-        for ex in iter_mined_examples(repo_root):
+        for ex in iter_mined_examples(repo_root, ground_truth_dir, num_workers):
             f.write(json.dumps(ex.to_jsonable(), ensure_ascii=False) + "\n")
             f.flush()  # Extra safety explicit flush
             count += 1
@@ -532,6 +718,59 @@ def dump_examples_to_jsonl(
     print(f"\n=== Mining Complete ===")
     print(f"Processed: {count} examples")
     print(f"Output: {out_path}")
+
+
+def _experiment_folder_name(ex: ExampleGroundTruth) -> str:
+    if ex.ground_truth_experiment:
+        return ex.ground_truth_experiment
+
+    cleaned_title = _clean_experiment_name(ex.title)
+    if cleaned_title:
+        return cleaned_title
+
+    return _clean_experiment_name(ex.example_id)
+
+
+def dump_examples_to_experiment_dirs(
+    repo_root: Path,
+    experiments_out_dir: Path,
+    ground_truth_dir: Optional[Path] = None,
+    num_workers: int = 1,
+) -> None:
+    """
+    Create an eval experiment directory for each mined example.
+
+    Each experiment directory contains:
+      - instructions.txt with the generated natural-language spec
+      - inputs/ for the agent's generated XML files
+      - outputs/ for run artifacts
+    """
+    experiments_out_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Writing experiment directories to: {experiments_out_dir}")
+    count = 0
+
+    for ex in iter_mined_examples(repo_root, ground_truth_dir, num_workers):
+        folder_name = _experiment_folder_name(ex)
+        if not folder_name:
+            print(f"  [warn] Skipping {ex.example_id}: could not derive folder name")
+            continue
+
+        exp_dir = experiments_out_dir / folder_name
+        exp_dir.mkdir(parents=True, exist_ok=True)
+        (exp_dir / "inputs").mkdir(exist_ok=True)
+        (exp_dir / "outputs").mkdir(exist_ok=True)
+        (exp_dir / "instructions.txt").write_text(
+            ex.natural_language_spec,
+            encoding="utf-8",
+        )
+
+        count += 1
+        print(f"  > Wrote experiment {count}: {folder_name}")
+
+    print(f"\n=== Mining Complete ===")
+    print(f"Processed: {count} examples")
+    print(f"Output: {experiments_out_dir}")
 
 
 # Project paths for default CLI usage
@@ -555,9 +794,49 @@ if __name__ == "__main__":
         "--out",
         type=Path,
         default=PROJECT_ROOT / "data" / "eval" / "example_pairs.jsonl",
-        help="Output JSONL path.",
+        help="Output JSONL path. Ignored when --experiments-out-dir is set.",
+    )
+    parser.add_argument(
+        "--experiments-out-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Write experiment folders here instead of JSONL. Each folder gets "
+            "instructions.txt plus empty inputs/ and outputs/ directories."
+        ),
+    )
+    parser.add_argument(
+        "--ground-truth-dir",
+        type=Path,
+        default=PROJECT_ROOT / "data" / "eval" / "experiments_gt",
+        help=(
+            "Directory containing per-experiment ground truth folders with "
+            "inputs/*.xml files. Use an empty/nonexistent path to fall back "
+            "to XML files referenced in the RST docs only."
+        ),
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=1,
+        help="Number of parallel LLM calls to run while mining examples. Default: 1.",
     )
     args = parser.parse_args()
+    if args.num_workers < 1:
+        parser.error("--num-workers must be >= 1")
 
     print("=== Mining GEOS Examples for Evaluation ===\n")
-    dump_examples_to_jsonl(args.repo_root, args.out)
+    if args.experiments_out_dir is not None:
+        dump_examples_to_experiment_dirs(
+            args.repo_root,
+            args.experiments_out_dir,
+            args.ground_truth_dir,
+            args.num_workers,
+        )
+    else:
+        dump_examples_to_jsonl(
+            args.repo_root,
+            args.out,
+            args.ground_truth_dir,
+            args.num_workers,
+        )
