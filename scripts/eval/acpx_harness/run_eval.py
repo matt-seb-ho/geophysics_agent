@@ -163,6 +163,27 @@ def build_prompt(agents_context: str, task_instructions: str) -> str:
     )
 
 
+def prepend_geos_primer_instruction(prompt: str) -> str:
+    return (
+        f"First action: use the Read tool to read {CONTAINER_GEOS_PRIMER_PATH}. "
+        "Use it as the high-level orientation before using GEOS documentation, "
+        "examples, schema, RAG tools, or writing XML.\n\n"
+        f"{prompt}"
+    )
+
+
+def redact_command_for_display(cmd: list[str]) -> str:
+    redacted: list[str] = []
+    secret_markers = ("KEY=", "TOKEN=", "SECRET=", "PASSWORD=")
+    for token in cmd:
+        if any(marker in token for marker in secret_markers):
+            key = token.split("=", 1)[0]
+            redacted.append(f"{key}=<redacted>")
+        else:
+            redacted.append(token)
+    return " ".join(redacted)
+
+
 # ---------------------------------------------------------------------------
 # Restriction helpers (mirrors run_experiments_no_geos_parallel.py pattern)
 # ---------------------------------------------------------------------------
@@ -412,6 +433,35 @@ def _extract_text_fragments(value: Any) -> list[dict[str, str]]:
     return fragments
 
 
+def _extract_mcp_server_statuses(value: Any) -> dict[str, str]:
+    statuses: dict[str, str] = {}
+
+    def visit(node: Any) -> None:
+        if isinstance(node, dict):
+            servers = node.get("mcp_servers")
+            if isinstance(servers, list):
+                for server in servers:
+                    if not isinstance(server, dict):
+                        continue
+                    name = server.get("name")
+                    status = server.get("status")
+                    if isinstance(name, str) and isinstance(status, str):
+                        statuses[name] = status
+            for child in node.values():
+                visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    visit(value)
+    return statuses
+
+
+def _contains_pseudo_rag_invocation(text: str) -> bool:
+    lowered = text.lower()
+    return "<invoke" in lowered and any(tool in lowered for tool in RAG_TOOL_NAMES)
+
+
 def _new_tool_counts() -> dict[str, Any]:
     return {
         "total_tool_calls": 0,
@@ -420,6 +470,9 @@ def _new_tool_counts() -> dict[str, Any]:
         "rag_tool_calls": 0,
         "rag_tool_counts": {name: 0 for name in sorted(RAG_TOOL_NAMES)},
         "rag_requirement_met": False,
+        "rag_mcp_unavailable": False,
+        "rag_pseudo_invocations": 0,
+        "mcp_server_statuses": {},
         "primer_read": False,
         "primer_read_tool_calls": 0,
     }
@@ -448,6 +501,51 @@ def _record_primer_read(counts: dict[str, Any]) -> None:
     counts["primer_read_tool_calls"] = counts.get("primer_read_tool_calls", 0) + 1
 
 
+def _record_mcp_statuses(counts: dict[str, Any], statuses: dict[str, str]) -> None:
+    if not statuses:
+        return
+    current = counts.setdefault("mcp_server_statuses", {})
+    current.update(statuses)
+    geos_status = statuses.get("geos-rag")
+    if geos_status and geos_status.lower() not in {"running", "ready", "connected", "available"}:
+        counts["rag_mcp_unavailable"] = True
+
+
+def analyze_event_stream_text(text: str) -> dict[str, Any]:
+    counts = _new_tool_counts()
+    stdout_tail: list[str] = []
+    latest_agent_response = ""
+
+    for line in text.splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            if line.strip():
+                stdout_tail.append(line.strip())
+            continue
+
+        _record_mcp_statuses(counts, _extract_mcp_server_statuses(record))
+        for tool_call in _extract_tool_calls(record):
+            _record_tool_call(counts, str(tool_call["name"]))
+            if _is_geos_primer_read(tool_call):
+                _record_primer_read(counts)
+        for fragment in _extract_text_fragments(record):
+            fragment_text = fragment["text"]
+            stdout_tail.append(fragment_text)
+            if _contains_pseudo_rag_invocation(fragment_text):
+                counts["rag_pseudo_invocations"] = (
+                    counts.get("rag_pseudo_invocations", 0) + 1
+                )
+            if fragment.get("role") == "assistant":
+                latest_agent_response = fragment_text
+
+    return {
+        "counts": counts,
+        "latest_stdout": stdout_tail[-40:],
+        "latest_agent_response": latest_agent_response,
+    }
+
+
 def write_claude_mcp_config(
     *,
     result_dir: Path,
@@ -468,6 +566,7 @@ def write_claude_mcp_config(
         {
             "mcpServers": {
                 "geos-rag": {
+                    "type": "stdio",
                     "command": "uv",
                     "args": [
                         "run",
@@ -485,6 +584,75 @@ def write_claude_mcp_config(
         },
     )
     return mcp_config_path
+
+
+def build_claude_native_mcp_smoke_command(
+    *,
+    result_dir: Path,
+    plugin_dir: Path,
+    vector_db_dir: Path,
+) -> list[str]:
+    return [
+        "docker", "run", "--rm",
+        "--user", f"{os.getuid()}:{os.getgid()}",
+        "-v", f"{result_dir}:/workspace:rw",
+        "-v", f"{plugin_dir}:/plugins/repo3:ro",
+        "-v", f"{vector_db_dir}:{CONTAINER_VECTOR_DB_DIR}:rw",
+        "-e", "HOME=/workspace/.claude_home",
+        "-e", "UV_CACHE_DIR=/workspace/.uv_cache",
+        "-e", "CLAUDE_PLUGIN_ROOT=/plugins/repo3",
+        "-e", f"GEOS_VECTOR_DB_DIR={CONTAINER_VECTOR_DB_DIR}",
+        DOCKER_IMAGE,
+        "uv",
+        "run",
+        "--script",
+        str(CONTAINER_PLUGIN_DIR / "scripts" / "geos_rag_mcp.py"),
+        "--smoke",
+    ]
+
+
+def preflight_claude_native_mcp(
+    *,
+    result_dir: Path,
+    plugin_dir: Path,
+    vector_db_dir: Path,
+    timeout: int = 180,
+) -> dict[str, Any]:
+    """Warm the uv script env and prove the repo3 MCP server can open its DB."""
+    cmd = build_claude_native_mcp_smoke_command(
+        result_dir=result_dir,
+        plugin_dir=plugin_dir,
+        vector_db_dir=vector_db_dir,
+    )
+    started = time.time()
+    completed = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=timeout,
+    )
+    result = {
+        "command": cmd,
+        "exit_code": completed.returncode,
+        "elapsed_seconds": round(time.time() - started, 1),
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "updated": datetime.now().isoformat(),
+    }
+    (result_dir / "mcp_preflight.json").write_text(json.dumps(result, indent=2))
+    if completed.returncode != 0:
+        detail = "\n".join(
+            part.strip()
+            for part in (completed.stdout, completed.stderr)
+            if part.strip()
+        )
+        raise RuntimeError(
+            "repo3 GEOS RAG MCP preflight failed before launching Claude. "
+            "Rebuild the geos-eval image if uv is missing, then rerun. "
+            f"Details: {detail or 'no output'}"
+        )
+    return result
 
 
 def build_claude_native_command(
@@ -641,11 +809,14 @@ def run_claude_native_task(
                 except json.JSONDecodeError:
                     fragments = [{"role": "stdout", "text": line.strip()}] if line.strip() else []
                     tool_calls: list[dict[str, Any]] = []
+                    mcp_statuses: dict[str, str] = {}
                 else:
                     fragments = _extract_text_fragments(record)
                     tool_calls = _extract_tool_calls(record)
+                    mcp_statuses = _extract_mcp_server_statuses(record)
 
                 with lock:
+                    _record_mcp_statuses(counts, mcp_statuses)
                     for tool_call in tool_calls:
                         _record_tool_call(counts, str(tool_call["name"]))
                         if _is_geos_primer_read(tool_call):
@@ -653,6 +824,10 @@ def run_claude_native_task(
                     for fragment in fragments:
                         text = fragment["text"]
                         stdout_tail.append(text)
+                        if _contains_pseudo_rag_invocation(text):
+                            counts["rag_pseudo_invocations"] = (
+                                counts.get("rag_pseudo_invocations", 0) + 1
+                            )
                         if fragment.get("role") == "assistant":
                             latest_agent_response = text
                     if len(stdout_tail) > 100:
@@ -708,7 +883,10 @@ def run_claude_native_task(
 
     rag_requirement_met = bool(counts["rag_requirement_met"])
     if process_status == "success" and requires_rag and not rag_requirement_met:
-        status = "failed_no_rag"
+        if counts.get("rag_mcp_unavailable") or counts.get("rag_pseudo_invocations"):
+            status = "failed_rag_unavailable"
+        else:
+            status = "failed_no_rag"
     else:
         status = process_status
 
@@ -765,6 +943,11 @@ def run_task(
 
     task_instructions = load_task_instructions(task_dir)
     prompt = build_prompt(agents_context, task_instructions)
+    resolved_geos_primer_path = (geos_primer_path or DEFAULT_GEOS_PRIMER_PATH).resolve()
+    primer_workspace_path: Path | None = None
+    if resolved_geos_primer_path.exists():
+        primer_workspace_path = copy_geos_primer(resolved_geos_primer_path, result_dir)
+        prompt = prepend_geos_primer_instruction(prompt)
 
     # Collect blocked GT XML filenames for this experiment
     blocked_xml_filenames: list[str] = []
@@ -791,8 +974,6 @@ def run_task(
     if runner == "claude_native":
         plugin_dir = (plugin_dir or DEFAULT_PLUGIN_DIR).resolve()
         vector_db_dir = (vector_db_dir or DEFAULT_VECTOR_DB_DIR).resolve()
-        geos_primer_path = (geos_primer_path or DEFAULT_GEOS_PRIMER_PATH).resolve()
-        primer_workspace_path = copy_geos_primer(geos_primer_path, result_dir)
         cleanup_vector_db_copy = False
         runtime_vector_db_dir = result_dir / ".vector_db_runtime"
         if not dry_run:
@@ -811,8 +992,6 @@ def run_task(
         )
         native_model = claude_model or agent.get("model") or DEFAULT_CLAUDE_MODEL
         native_prompt = (
-            f"Read {CONTAINER_GEOS_PRIMER_PATH} before using GEOS documentation, examples, "
-            "schema, or RAG tools. Use it as the high-level orientation for the task.\n"
             "Use the repo3-plugin geos-rag skill for this task. "
             "Before writing XML, call at least one of the plugin RAG tools: "
             "search_navigator, search_schema, or search_technical.\n\n"
@@ -833,7 +1012,7 @@ def run_task(
         )
 
         if dry_run:
-            display = " ".join(cmd[:-1] + ["<prompt>"])
+            display = redact_command_for_display(cmd[:-1] + ["<prompt>"])
             print(f"  [DRY RUN] {display}")
             return {"task": task_name, "agent": agent_key, "status": "dry_run"}
 
@@ -852,8 +1031,8 @@ def run_task(
                     "container_vector_db_dir": str(CONTAINER_VECTOR_DB_DIR),
                     "mcp_config_path": str(mcp_config_path),
                     "container_mcp_config_path": str(CONTAINER_MCP_CONFIG_PATH),
-                    "geos_primer_path": str(geos_primer_path),
-                    "primer_workspace_path": str(primer_workspace_path),
+                    "geos_primer_path": str(resolved_geos_primer_path),
+                    "primer_workspace_path": str(primer_workspace_path) if primer_workspace_path else None,
                     "container_geos_primer_path": str(CONTAINER_GEOS_PRIMER_PATH),
                     "claude_model": native_model,
                     "anthropic_base_url": docker_env.get("ANTHROPIC_BASE_URL"),
@@ -868,6 +1047,24 @@ def run_task(
         )
 
         try:
+            _safe_write_json(
+                result_dir / "status.json",
+                {
+                    "task": task_name,
+                    "agent": agent_key,
+                    "run_name": run_name,
+                    "status": "preflight",
+                    "process_status": "preflight",
+                    "updated": datetime.now().isoformat(),
+                    "blocked_gt_xml_filenames": blocked_xml_filenames,
+                    **_new_tool_counts(),
+                },
+            )
+            preflight_claude_native_mcp(
+                result_dir=result_dir,
+                plugin_dir=plugin_dir,
+                vector_db_dir=runtime_vector_db_dir,
+            )
             return run_claude_native_task(
                 task_name=task_name,
                 agent_key=agent_key,
@@ -930,7 +1127,7 @@ def run_task(
     ]
 
     if dry_run:
-        display = " ".join(cmd[:12]) + " ..."
+        display = redact_command_for_display(cmd[:-1] + ["<prompt>"])
         print(f"  [DRY RUN] {display}")
         return {"task": task_name, "agent": agent_key, "status": "dry_run"}
 
@@ -946,6 +1143,11 @@ def run_task(
         stderr: str = "",
         error: str | None = None,
     ) -> None:
+        analysis = analyze_event_stream_text(stdout) if stdout else {
+            "counts": _new_tool_counts(),
+            "latest_stdout": [],
+            "latest_agent_response": "",
+        }
         payload: dict[str, Any] = {
             "task": task_name,
             "agent": agent_key,
@@ -956,10 +1158,10 @@ def run_task(
             "started": started_iso,
             "updated": datetime.now().isoformat(),
             "elapsed_seconds": round(time.time() - started_time, 1),
-            "latest_stdout": stdout.splitlines()[-40:],
-            "latest_agent_response": "",
+            "latest_stdout": analysis["latest_stdout"] or stdout.splitlines()[-40:],
+            "latest_agent_response": analysis["latest_agent_response"],
             "latest_stderr": stderr.splitlines()[-40:],
-            **_new_tool_counts(),
+            **analysis["counts"],
         }
         if error:
             payload["error"] = error
@@ -990,6 +1192,9 @@ def run_task(
                 "run_name": run_name,
                 "blocked_gt_xml_filenames": blocked_xml_filenames,
                 "filtered_geos_copy": str(filtered_geos),
+                "geos_primer_path": str(resolved_geos_primer_path),
+                "primer_workspace_path": str(primer_workspace_path) if primer_workspace_path else None,
+                "container_geos_primer_path": str(CONTAINER_GEOS_PRIMER_PATH),
                 "started": started_iso,
             },
             indent=2,
@@ -1752,7 +1957,9 @@ def dashboard_html() -> bytes:
       const s = String(status || "pending");
       if (s === "success") return "ok";
       if (s === "running") return "run";
+      if (s === "preflight") return "run";
       if (s === "failed_no_rag") return "nrg";
+      if (s === "failed_rag_unavailable") return "nrg";
       if (s === "pending") return "pnd";
       return "err";
     }
@@ -1807,6 +2014,7 @@ def dashboard_html() -> bytes:
             running: 0,
             failed: 0,
             noRag: 0,
+            ragUnavailable: 0,
             pending: 0,
             ragMet: 0,
             primerRead: 0,
@@ -1821,7 +2029,9 @@ def dashboard_html() -> bytes:
         const status = task.status || "pending";
         if (status === "success") m.success += 1;
         else if (status === "running") m.running += 1;
+        else if (status === "preflight") m.running += 1;
         else if (status === "failed_no_rag") m.noRag += 1;
+        else if (status === "failed_rag_unavailable") m.ragUnavailable += 1;
         else if (status === "pending") m.pending += 1;
         else m.failed += 1;
         if (task.rag_requirement_met) m.ragMet += 1;
@@ -1844,11 +2054,11 @@ def dashboard_html() -> bytes:
           <div class="k">Agent</div>
           <div class="name">${esc(m.agent)}</div>
           <div class="v">${esc(m.success)} / ${esc(m.total)}</div>
-          <div class="sub">success ${esc(health)}% | running ${esc(m.running)} | error ${esc(m.failed)} | no_rag ${esc(m.noRag)} | pending ${esc(m.pending)}</div>
+          <div class="sub">success ${esc(health)}% | running ${esc(m.running)} | error ${esc(m.failed)} | no_rag ${esc(m.noRag)} | rag_down ${esc(m.ragUnavailable)} | pending ${esc(m.pending)}</div>
           <div class="barline" aria-hidden="true">
             <i class="g" style="width:${(m.success / denom) * 100}%"></i>
             <i class="a" style="width:${(m.running / denom) * 100}%"></i>
-            <i class="r" style="width:${((m.failed + m.noRag) / denom) * 100}%"></i>
+            <i class="r" style="width:${((m.failed + m.noRag + m.ragUnavailable) / denom) * 100}%"></i>
             <i class="b" style="width:${(m.pending / denom) * 100}%"></i>
           </div>
           <div class="sub">Primer ${esc(m.primerRead)} / ${esc(m.total)} (${esc(primerRate)}%) | RAG ${esc(ragRate)}% | nav ${esc(m.nav)} | sch ${esc(m.sch)} | tech ${esc(m.tech)} | tools ${esc(m.tools)}</div>
@@ -1856,7 +2066,7 @@ def dashboard_html() -> bytes:
       }).join("") || `<div class="empty">No agent metrics yet</div>`;
     }
     function renderFilters(tasks) {
-      const statuses = ["all", "running", "success", "failed_no_rag", "failed", "error", "timeout", "pending"];
+      const statuses = ["all", "preflight", "running", "success", "failed_rag_unavailable", "failed_no_rag", "failed", "error", "timeout", "pending"];
       document.getElementById("status-filters").innerHTML = statuses.map(status => {
         const on = selectedStatus === status ? "on" : "";
         return `<button class="${on}" data-status="${esc(status)}">${esc(status)}</button>`;
@@ -2170,8 +2380,8 @@ def main() -> None:
         "--geos-primer-path",
         type=Path,
         default=DEFAULT_GEOS_PRIMER_PATH,
-        help=f"GEOS primer markdown copied into native Claude workspaces as "
-             f"{CONTAINER_GEOS_PRIMER_PATH} and explicitly read before RAG use "
+        help=f"GEOS primer markdown copied into task workspaces as "
+             f"{CONTAINER_GEOS_PRIMER_PATH} and explicitly read before GEOS/RAG use "
              f"(default: {DEFAULT_GEOS_PRIMER_PATH})",
     )
     parser.add_argument(
@@ -2232,15 +2442,18 @@ def main() -> None:
         if not args.vector_db_dir.exists():
             print(f"{C.FAIL}Error: vector DB dir not found: {args.vector_db_dir}{C.ENDC}")
             sys.exit(1)
-        if not args.geos_primer_path.exists():
-            print(f"{C.FAIL}Error: GEOS primer not found: {args.geos_primer_path}{C.ENDC}")
-            sys.exit(1)
         if not args.dry_run and not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
             print(
                 f"{C.FAIL}Error: ANTHROPIC_AUTH_TOKEN is required for "
                 f"claude_code_repo3_plugin. Export it in your shell before running.{C.ENDC}"
             )
             sys.exit(1)
+
+    if not args.dashboard_only and not args.geos_primer_path.exists():
+        print(
+            f"{C.WARNING}Warning: GEOS primer not found: {args.geos_primer_path}; "
+            f"primer injection disabled.{C.ENDC}"
+        )
 
     # Normalise ground-truth-dir: treat missing or empty-string as None
     ground_truth_dir: Path | None = args.ground_truth_dir
@@ -2309,10 +2522,10 @@ def main() -> None:
     print(f"  GT XML blocking: {ground_truth_dir or 'disabled'}")
     print(f"  Results root   : {args.results_root_dir}")
     print(f"  Temp GEOS dir  : {args.tmp_geos_parent}")
+    print(f"  GEOS primer    : {args.geos_primer_path if args.geos_primer_path.exists() else 'disabled'}")
     if selected_native_claude:
         print(f"  Plugin dir     : {args.plugin_dir}")
         print(f"  Vector DB dir  : {args.vector_db_dir}")
-        print(f"  GEOS primer    : {args.geos_primer_path}")
         print(f"  Claude model   : {args.claude_model}")
     for agent_key, path in result_paths.items():
         print(f"  Results ({agent_key}): {path}")
