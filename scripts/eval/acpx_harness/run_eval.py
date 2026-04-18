@@ -55,6 +55,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -98,6 +99,8 @@ CONTAINER_VECTOR_DB_DIR = Path("/data/shared/geophysics_agent_data/data/vector_d
 CONTAINER_MCP_CONFIG_PATH = Path("/workspace/claude_mcp_config.json")
 CONTAINER_GEOS_PRIMER_PATH = Path("/workspace/GEOS_PRIMER.md")
 RAG_TOOL_NAMES = {"search_navigator", "search_schema", "search_technical"}
+PSEUDO_TOOL_RE = re.compile(r"<invoke\s+name=[\"']([^\"']+)[\"']", re.IGNORECASE)
+NATIVE_CLAUDE_TOOLS = "default"
 STOP_REQUESTED = threading.Event()
 ACTIVE_PROCESS_LOCK = threading.Lock()
 ACTIVE_PROCESSES: dict[int, subprocess.Popen[str]] = {}
@@ -167,7 +170,11 @@ def prepend_geos_primer_instruction(prompt: str) -> str:
     return (
         f"First action: use the Read tool to read {CONTAINER_GEOS_PRIMER_PATH}. "
         "Use it as the high-level orientation before using GEOS documentation, "
-        "examples, schema, RAG tools, or writing XML.\n\n"
+        "examples, schema, RAG tools, or writing XML.\n"
+        "Use only real tool calls exposed by the runtime. Do not print XML-style "
+        "<invoke> blocks, <parameter> blocks, or minimax:tool_call wrappers; those "
+        "are text and will not execute. To create files, use the actual Write, Edit, "
+        "or Bash tools exposed by the runtime, and write only under /workspace/inputs.\n\n"
         f"{prompt}"
     )
 
@@ -457,9 +464,8 @@ def _extract_mcp_server_statuses(value: Any) -> dict[str, str]:
     return statuses
 
 
-def _contains_pseudo_rag_invocation(text: str) -> bool:
-    lowered = text.lower()
-    return "<invoke" in lowered and any(tool in lowered for tool in RAG_TOOL_NAMES)
+def _extract_pseudo_tool_invocations(text: str) -> list[str]:
+    return [match.group(1) for match in PSEUDO_TOOL_RE.finditer(text)]
 
 
 def _new_tool_counts() -> dict[str, Any]:
@@ -472,6 +478,8 @@ def _new_tool_counts() -> dict[str, Any]:
         "rag_requirement_met": False,
         "rag_mcp_unavailable": False,
         "rag_pseudo_invocations": 0,
+        "pseudo_tool_calls": 0,
+        "pseudo_tool_counts": {},
         "mcp_server_statuses": {},
         "primer_read": False,
         "primer_read_tool_calls": 0,
@@ -499,6 +507,74 @@ def _record_tool_call(counts: dict[str, Any], tool_name: str) -> None:
 def _record_primer_read(counts: dict[str, Any]) -> None:
     counts["primer_read"] = True
     counts["primer_read_tool_calls"] = counts.get("primer_read_tool_calls", 0) + 1
+
+
+def _record_pseudo_tool_invocations(counts: dict[str, Any], text: str) -> None:
+    pseudo_tool_counts = counts.setdefault("pseudo_tool_counts", {})
+    for tool_name in _extract_pseudo_tool_invocations(text):
+        pseudo_tool_counts[tool_name] = pseudo_tool_counts.get(tool_name, 0) + 1
+        counts["pseudo_tool_calls"] = counts.get("pseudo_tool_calls", 0) + 1
+        if _is_rag_tool(tool_name):
+            counts["rag_pseudo_invocations"] = (
+                counts.get("rag_pseudo_invocations", 0) + 1
+            )
+
+
+def _has_non_rag_pseudo_tool(counts: dict[str, Any]) -> bool:
+    return any(
+        not _is_rag_tool(str(tool_name))
+        for tool_name in counts.get("pseudo_tool_counts", {})
+    )
+
+
+def classify_final_status(
+    *,
+    process_status: str,
+    requires_rag: bool,
+    counts: dict[str, Any],
+) -> str:
+    if process_status == "success" and _has_non_rag_pseudo_tool(counts):
+        return "failed_pseudo_tool"
+    if process_status == "success" and requires_rag and not bool(counts["rag_requirement_met"]):
+        if counts.get("rag_mcp_unavailable") or counts.get("rag_pseudo_invocations"):
+            return "failed_rag_unavailable"
+        return "failed_no_rag"
+    return process_status
+
+
+def pseudo_tool_retry_prompt(previous_status: str, counts: dict[str, Any]) -> str:
+    pseudo_counts = counts.get("pseudo_tool_counts", {})
+    pseudo_summary = ", ".join(
+        f"{name} x{count}" for name, count in sorted(pseudo_counts.items())
+    ) or "unknown pseudo tool"
+    return (
+        "\n\n--- RETRY AFTER NON-EXECUTED TOOL OUTPUT ---\n"
+        f"The previous attempt ended as {previous_status}. It printed pseudo tool "
+        f"invocations ({pseudo_summary}) as text. Those blocks did not execute and "
+        "did not create files or call RAG. Retry from the beginning now.\n"
+        "Use only real runtime tool calls. Do not print <invoke>, <parameter>, "
+        "minimax:tool_call, or similar wrappers. If you need to write XML files, "
+        "call the actual Write tool when it is available, otherwise use actual Edit "
+        "or Bash tool calls. If RAG is required, call the actual geos-rag MCP tools.\n"
+        "--- END RETRY NOTICE ---"
+    )
+
+
+def archive_native_attempt_outputs(result_dir: Path, attempt: int) -> None:
+    archive_dir = result_dir / f"attempt_{attempt}"
+    archive_dir.mkdir(exist_ok=True)
+    for filename in (
+        "status.json",
+        "tool_calls.json",
+        "events.jsonl",
+        "acpx_output.json",
+        "stdout.txt",
+        "stderr.txt",
+        "exit_code.txt",
+    ):
+        path = result_dir / filename
+        if path.exists():
+            path.replace(archive_dir / filename)
 
 
 def _record_mcp_statuses(counts: dict[str, Any], statuses: dict[str, str]) -> None:
@@ -532,10 +608,7 @@ def analyze_event_stream_text(text: str) -> dict[str, Any]:
         for fragment in _extract_text_fragments(record):
             fragment_text = fragment["text"]
             stdout_tail.append(fragment_text)
-            if _contains_pseudo_rag_invocation(fragment_text):
-                counts["rag_pseudo_invocations"] = (
-                    counts.get("rag_pseudo_invocations", 0) + 1
-                )
+            _record_pseudo_tool_invocations(counts, fragment_text)
             if fragment.get("role") == "assistant":
                 latest_agent_response = fragment_text
 
@@ -688,6 +761,7 @@ def build_claude_native_command(
         "--bare",
         "--verbose",
         "--model", model,
+        "--tools", NATIVE_CLAUDE_TOOLS,
         "--plugin-dir", str(CONTAINER_PLUGIN_DIR),
         f"--mcp-config={CONTAINER_MCP_CONFIG_PATH}",
         "--strict-mcp-config",
@@ -824,10 +898,7 @@ def run_claude_native_task(
                     for fragment in fragments:
                         text = fragment["text"]
                         stdout_tail.append(text)
-                        if _contains_pseudo_rag_invocation(text):
-                            counts["rag_pseudo_invocations"] = (
-                                counts.get("rag_pseudo_invocations", 0) + 1
-                            )
+                        _record_pseudo_tool_invocations(counts, text)
                         if fragment.get("role") == "assistant":
                             latest_agent_response = text
                     if len(stdout_tail) > 100:
@@ -882,13 +953,11 @@ def run_claude_native_task(
         stderr_thread.join(timeout=5)
 
     rag_requirement_met = bool(counts["rag_requirement_met"])
-    if process_status == "success" and requires_rag and not rag_requirement_met:
-        if counts.get("rag_mcp_unavailable") or counts.get("rag_pseudo_invocations"):
-            status = "failed_rag_unavailable"
-        else:
-            status = "failed_no_rag"
-    else:
-        status = process_status
+    status = classify_final_status(
+        process_status=process_status,
+        requires_rag=requires_rag,
+        counts=counts,
+    )
 
     exit_code_path.write_text("timeout" if return_code is None else str(return_code))
     with lock:
@@ -909,6 +978,8 @@ def run_claude_native_task(
         "primer_read_tool_calls": counts.get("primer_read_tool_calls", 0),
         "total_tool_calls": counts["total_tool_calls"],
         "per_tool_counts": counts["per_tool_counts"],
+        "pseudo_tool_calls": counts.get("pseudo_tool_calls", 0),
+        "pseudo_tool_counts": counts.get("pseudo_tool_counts", {}),
     }
 
 
@@ -924,6 +995,7 @@ def run_task(
     run_name: str,
     timeout: int,
     dry_run: bool,
+    pseudo_tool_retries: int = 1,
     ground_truth_dir: Path | None = None,
     plugin_dir: Path | None = None,
     vector_db_dir: Path | None = None,
@@ -1065,16 +1137,65 @@ def run_task(
                 plugin_dir=plugin_dir,
                 vector_db_dir=runtime_vector_db_dir,
             )
-            return run_claude_native_task(
-                task_name=task_name,
-                agent_key=agent_key,
-                run_name=run_name,
-                cmd=cmd,
-                docker_env=docker_env,
-                result_dir=result_dir,
-                timeout=timeout,
-                requires_rag=bool(agent.get("requires_rag")),
-            )
+
+            attempt = 0
+            current_cmd = cmd
+            while True:
+                result = run_claude_native_task(
+                    task_name=task_name,
+                    agent_key=agent_key,
+                    run_name=run_name,
+                    cmd=current_cmd,
+                    docker_env=docker_env,
+                    result_dir=result_dir,
+                    timeout=timeout,
+                    requires_rag=bool(agent.get("requires_rag")),
+                )
+                retryable_status = result.get("status") in {
+                    "failed_pseudo_tool",
+                    "failed_rag_unavailable",
+                }
+                if (
+                    not retryable_status
+                    or int(result.get("pseudo_tool_calls") or 0) <= 0
+                    or attempt >= pseudo_tool_retries
+                    or STOP_REQUESTED.is_set()
+                ):
+                    return result
+
+                attempt += 1
+                archive_native_attempt_outputs(result_dir, attempt)
+                notice = pseudo_tool_retry_prompt(
+                    str(result.get("status")),
+                    {
+                        "pseudo_tool_counts": result.get("pseudo_tool_counts", {}),
+                    },
+                )
+                retry_prompt = f"{native_prompt}{notice}"
+                current_cmd = build_claude_native_command(
+                    filtered_geos=filtered_geos,
+                    result_dir=result_dir,
+                    plugin_dir=plugin_dir,
+                    vector_db_dir=runtime_vector_db_dir,
+                    model=native_model,
+                    prompt=retry_prompt,
+                )
+                _safe_write_json(
+                    result_dir / "status.json",
+                    {
+                        "task": task_name,
+                        "agent": agent_key,
+                        "run_name": run_name,
+                        "status": "retrying_pseudo_tool",
+                        "process_status": "retrying_pseudo_tool",
+                        "updated": datetime.now().isoformat(),
+                        "retry_attempt": attempt,
+                        "previous_status": result.get("status"),
+                        "pseudo_tool_counts": result.get("pseudo_tool_counts", {}),
+                        "blocked_gt_xml_filenames": blocked_xml_filenames,
+                        **_new_tool_counts(),
+                    },
+                )
         except Exception as exc:
             (result_dir / "exit_code.txt").write_text("error")
             (result_dir / "stderr.txt").write_text(str(exc))
@@ -1218,6 +1339,12 @@ def run_task(
             status = "interrupted"
         else:
             status = "success" if proc.returncode == 0 else "failed"
+        if status == "success":
+            status = classify_final_status(
+                process_status=status,
+                requires_rag=False,
+                counts=analyze_event_stream_text(stdout)["counts"],
+            )
         (result_dir / "acpx_output.json").write_text(stdout)
         (result_dir / "stderr.txt").write_text(stderr)
         (result_dir / "exit_code.txt").write_text(str(proc.returncode))
@@ -1958,8 +2085,10 @@ def dashboard_html() -> bytes:
       if (s === "success") return "ok";
       if (s === "running") return "run";
       if (s === "preflight") return "run";
+      if (s === "retrying_pseudo_tool") return "run";
       if (s === "failed_no_rag") return "nrg";
       if (s === "failed_rag_unavailable") return "nrg";
+      if (s === "failed_pseudo_tool") return "nrg";
       if (s === "pending") return "pnd";
       return "err";
     }
@@ -1996,7 +2125,10 @@ def dashboard_html() -> bytes:
       return `${n.toFixed(1)}s`;
     }
     function topTools(task, limit = 3) {
-      return Object.entries(task.per_tool_counts || {})
+      const actual = Object.entries(task.per_tool_counts || {});
+      const pseudo = Object.entries(task.pseudo_tool_counts || {})
+        .map(([name, count]) => [`pseudo:${name}`, count]);
+      return actual.concat(pseudo)
         .sort((a, b) => b[1] - a[1])
         .slice(0, limit)
         .map(([name, count]) => `<span class="tool">${esc(name)}<b>${esc(count)}</b></span>`)
@@ -2015,6 +2147,7 @@ def dashboard_html() -> bytes:
             failed: 0,
             noRag: 0,
             ragUnavailable: 0,
+            pseudoTool: 0,
             pending: 0,
             ragMet: 0,
             primerRead: 0,
@@ -2030,13 +2163,15 @@ def dashboard_html() -> bytes:
         if (status === "success") m.success += 1;
         else if (status === "running") m.running += 1;
         else if (status === "preflight") m.running += 1;
+        else if (status === "retrying_pseudo_tool") m.running += 1;
         else if (status === "failed_no_rag") m.noRag += 1;
         else if (status === "failed_rag_unavailable") m.ragUnavailable += 1;
+        else if (status === "failed_pseudo_tool") m.pseudoTool += 1;
         else if (status === "pending") m.pending += 1;
         else m.failed += 1;
         if (task.rag_requirement_met) m.ragMet += 1;
         if (task.primer_read) m.primerRead += 1;
-        m.tools += Number(task.total_tool_calls || 0);
+        m.tools += Number(task.total_tool_calls || 0) + Number(task.pseudo_tool_calls || 0);
         m.nav += ragCount(task, "search_navigator");
         m.sch += ragCount(task, "search_schema");
         m.tech += ragCount(task, "search_technical");
@@ -2054,11 +2189,11 @@ def dashboard_html() -> bytes:
           <div class="k">Agent</div>
           <div class="name">${esc(m.agent)}</div>
           <div class="v">${esc(m.success)} / ${esc(m.total)}</div>
-          <div class="sub">success ${esc(health)}% | running ${esc(m.running)} | error ${esc(m.failed)} | no_rag ${esc(m.noRag)} | rag_down ${esc(m.ragUnavailable)} | pending ${esc(m.pending)}</div>
+          <div class="sub">success ${esc(health)}% | running ${esc(m.running)} | error ${esc(m.failed)} | no_rag ${esc(m.noRag)} | rag_down ${esc(m.ragUnavailable)} | pseudo ${esc(m.pseudoTool)} | pending ${esc(m.pending)}</div>
           <div class="barline" aria-hidden="true">
             <i class="g" style="width:${(m.success / denom) * 100}%"></i>
             <i class="a" style="width:${(m.running / denom) * 100}%"></i>
-            <i class="r" style="width:${((m.failed + m.noRag + m.ragUnavailable) / denom) * 100}%"></i>
+            <i class="r" style="width:${((m.failed + m.noRag + m.ragUnavailable + m.pseudoTool) / denom) * 100}%"></i>
             <i class="b" style="width:${(m.pending / denom) * 100}%"></i>
           </div>
           <div class="sub">Primer ${esc(m.primerRead)} / ${esc(m.total)} (${esc(primerRate)}%) | RAG ${esc(ragRate)}% | nav ${esc(m.nav)} | sch ${esc(m.sch)} | tech ${esc(m.tech)} | tools ${esc(m.tools)}</div>
@@ -2066,7 +2201,7 @@ def dashboard_html() -> bytes:
       }).join("") || `<div class="empty">No agent metrics yet</div>`;
     }
     function renderFilters(tasks) {
-      const statuses = ["all", "preflight", "running", "success", "failed_rag_unavailable", "failed_no_rag", "failed", "error", "timeout", "pending"];
+      const statuses = ["all", "preflight", "retrying_pseudo_tool", "running", "success", "failed_pseudo_tool", "failed_rag_unavailable", "failed_no_rag", "failed", "error", "timeout", "pending"];
       document.getElementById("status-filters").innerHTML = statuses.map(status => {
         const on = selectedStatus === status ? "on" : "";
         return `<button class="${on}" data-status="${esc(status)}">${esc(status)}</button>`;
@@ -2103,7 +2238,10 @@ def dashboard_html() -> bytes:
         if (sortMode === "agent") return String(a.agent || "").localeCompare(String(b.agent || "")) || String(a.task || "").localeCompare(String(b.task || ""));
         if (sortMode === "primer") return Number(Boolean(b.primer_read)) - Number(Boolean(a.primer_read));
         if (sortMode === "rag") return Number(b.rag_tool_calls || 0) - Number(a.rag_tool_calls || 0);
-        if (sortMode === "tools") return Number(b.total_tool_calls || 0) - Number(a.total_tool_calls || 0);
+        if (sortMode === "tools") {
+          return (Number(b.total_tool_calls || 0) + Number(b.pseudo_tool_calls || 0)) -
+            (Number(a.total_tool_calls || 0) + Number(a.pseudo_tool_calls || 0));
+        }
         return Number(b.elapsed_seconds || 0) - Number(a.elapsed_seconds || 0);
       });
       return tasks;
@@ -2338,6 +2476,12 @@ def main() -> None:
         help=f"Timeout per task in seconds (default: {DEFAULT_TIMEOUT})",
     )
     parser.add_argument(
+        "--pseudo-tool-retries",
+        type=int,
+        default=1,
+        help="Retries per task when an agent prints non-executed pseudo tool invocations (default: 1)",
+    )
+    parser.add_argument(
         "--workers", "-w",
         type=int,
         default=2,
@@ -2518,6 +2662,7 @@ def main() -> None:
     print(f"  Combos         : {len(combos)}")
     print(f"  Timeout        : {args.timeout}s per task")
     print(f"  Workers        : {args.workers}")
+    print(f"  Pseudo retries : {args.pseudo_tool_retries}")
     print(f"  Dry run        : {args.dry_run}")
     print(f"  GT XML blocking: {ground_truth_dir or 'disabled'}")
     print(f"  Results root   : {args.results_root_dir}")
@@ -2565,14 +2710,21 @@ def main() -> None:
     executor = ThreadPoolExecutor(max_workers=args.workers)
     futures = {
         executor.submit(
-            run_task, task, agent, agents_context,
-            experiments_dir, args.run, args.timeout, args.dry_run,
-            ground_truth_dir,
-            args.plugin_dir,
-            args.vector_db_dir,
-            args.geos_primer_path,
-            args.claude_model,
-            args.tmp_geos_parent,
+            run_task,
+            task_name=task,
+            agent_key=agent,
+            agents_context=agents_context,
+            experiments_dir=experiments_dir,
+            run_name=args.run,
+            timeout=args.timeout,
+            dry_run=args.dry_run,
+            pseudo_tool_retries=args.pseudo_tool_retries,
+            ground_truth_dir=ground_truth_dir,
+            plugin_dir=args.plugin_dir,
+            vector_db_dir=args.vector_db_dir,
+            geos_primer_path=args.geos_primer_path,
+            claude_model=args.claude_model,
+            tmp_geos_parent=args.tmp_geos_parent,
         ): (task, agent)
         for task, agent in combos
     }
