@@ -1100,9 +1100,11 @@ def collect_dashboard_snapshot(
     run_name: str,
     agent_keys: list[str],
     task_names: list[str] | None = None,
+    blocked_gt_by_task: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     tasks: list[dict[str, Any]] = []
     expected_task_names = set(task_names or [])
+    blocked_gt_by_task = blocked_gt_by_task or {}
     for agent_key in agent_keys:
         root = AGENTS[agent_key]["results_dir"] / run_name
         discovered_task_names = set(expected_task_names)
@@ -1110,6 +1112,7 @@ def collect_dashboard_snapshot(
             discovered_task_names.update(path.name for path in root.iterdir() if path.is_dir())
         for task_name in sorted(discovered_task_names):
             task_dir = root / task_name
+            metadata = _read_json(task_dir / "eval_metadata.json") or {}
             default_status = {
                 "task": task_name,
                 "agent": agent_key,
@@ -1119,10 +1122,16 @@ def collect_dashboard_snapshot(
                 "latest_stdout": [],
                 "latest_agent_response": "",
                 "latest_stderr": [],
+                "blocked_gt_xml_filenames": metadata.get(
+                    "blocked_gt_xml_filenames",
+                    blocked_gt_by_task.get(task_name, []),
+                ),
                 **_new_tool_counts(),
             }
             status = {**default_status, **(_read_json(task_dir / "status.json") or {})}
             status["task_dir"] = str(task_dir)
+            if "blocked_gt_xml_filenames" not in status:
+                status["blocked_gt_xml_filenames"] = default_status["blocked_gt_xml_filenames"]
             tasks.append(status)
     tasks.sort(key=lambda item: (str(item.get("agent", "")), str(item.get("task", ""))))
     return {
@@ -1204,6 +1213,14 @@ def collect_conversation_log(
     except ValueError:
         return {"error": "invalid task path", "entries": []}
 
+    status = _read_json(task_dir / "status.json") or {}
+    metadata = _read_json(task_dir / "eval_metadata.json") or {}
+    blocked_gt_xml_filenames = (
+        status.get("blocked_gt_xml_filenames")
+        or metadata.get("blocked_gt_xml_filenames")
+        or []
+    )
+
     entries: list[dict[str, str]] = []
     events_path = task_dir / "events.jsonl"
     if events_path.exists():
@@ -1238,6 +1255,7 @@ def collect_conversation_log(
         "task": task_name,
         "agent": agent_key,
         "task_dir": str(task_dir),
+        "blocked_gt_xml_filenames": blocked_gt_xml_filenames,
         "entries": entries,
     }
 
@@ -1439,6 +1457,16 @@ def dashboard_html() -> bytes:
       color: var(--muted);
       font-size: 10px;
       margin-top: 3px;
+      max-width: 440px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .blocked-gt {
+      color: var(--red);
+      font-size: 10px;
+      font-weight: 600;
+      margin-top: 4px;
       max-width: 440px;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -1736,6 +1764,17 @@ def dashboard_html() -> bytes:
       const state = count > 0 ? "ok" : "";
       return `<span class="ragrow"><s class="${state}"></s></span> ${esc(count)}`;
     }
+    function blockedGtFiles(task) {
+      const files = task.blocked_gt_xml_filenames;
+      return Array.isArray(files) ? files : [];
+    }
+    function blockedGtSummary(task, max = 3) {
+      const files = blockedGtFiles(task);
+      if (!files.length) return "blocked GT: none";
+      const shown = files.slice(0, max).join(", ");
+      const extra = files.length > max ? ` +${files.length - max} more` : "";
+      return `blocked GT: ${shown}${extra}`;
+    }
     function primerCell(task) {
       const read = Boolean(task.primer_read);
       const count = Number(task.primer_read_tool_calls || 0);
@@ -1845,7 +1884,8 @@ def dashboard_html() -> bytes:
         tasks = tasks.filter(task =>
           String(task.agent || "").toLowerCase().includes(q) ||
           String(task.task || "").toLowerCase().includes(q) ||
-          String(task.task_dir || "").toLowerCase().includes(q)
+          String(task.task_dir || "").toLowerCase().includes(q) ||
+          blockedGtFiles(task).some(file => String(file).toLowerCase().includes(q))
         );
       }
       tasks.sort((a, b) => {
@@ -1877,6 +1917,7 @@ def dashboard_html() -> bytes:
           <td>
             <div class="task-name">${esc(task.task)}</div>
             <div class="task-dir">${esc(task.task_dir || "")}</div>
+            <div class="blocked-gt" title="${esc(blockedGtFiles(task).join(", ") || "none")}">${esc(blockedGtSummary(task))}</div>
           </td>
           <td>
             <span class="stat ${group}"><i class="mark"></i>${esc(status)}</span>
@@ -1917,7 +1958,9 @@ def dashboard_html() -> bytes:
       const url = `/api/conversation?agent=${encodeURIComponent(agent)}&task=${encodeURIComponent(task)}`;
       const response = await fetch(url, { cache: "no-store" });
       const payload = await response.json();
-      document.getElementById("log-meta").textContent = `${payload.agent || agent} | ${payload.task_dir || ""}`;
+      const blocked = Array.isArray(payload.blocked_gt_xml_filenames) ? payload.blocked_gt_xml_filenames : [];
+      const blockedText = blocked.length ? blocked.join(", ") : "none";
+      document.getElementById("log-meta").textContent = `${payload.agent || agent} | ${payload.task_dir || ""} | blocked GT: ${blockedText}`;
       if (payload.error) {
         lastConversationText = payload.error;
         document.getElementById("conversation").innerHTML = `<div class="empty">${esc(payload.error)}</div>`;
@@ -1970,6 +2013,7 @@ def start_dashboard_server(
     run_name: str,
     agent_keys: list[str],
     task_names: list[str],
+    blocked_gt_by_task: dict[str, list[str]],
     host: str,
     port: int,
 ) -> tuple[ThreadingHTTPServer, str]:
@@ -1987,7 +2031,12 @@ def start_dashboard_server(
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             if parsed.path == "/api/status":
-                payload = collect_dashboard_snapshot(run_name, agent_keys, task_names)
+                payload = collect_dashboard_snapshot(
+                    run_name,
+                    agent_keys,
+                    task_names,
+                    blocked_gt_by_task,
+                )
                 self._send_json(200, payload)
                 return
 
@@ -2230,6 +2279,13 @@ def main() -> None:
         print(f"{C.FAIL}No tasks to run.{C.ENDC}")
         sys.exit(1)
 
+    blocked_gt_by_task: dict[str, list[str]] = {}
+    if ground_truth_dir is not None:
+        blocked_gt_by_task = {
+            task: collect_ground_truth_xml_filenames(ground_truth_dir / task)
+            for task in tasks
+        }
+
     agents_context = load_agents_md()
     combos = [(task, agent) for task in tasks for agent in args.agents]
 
@@ -2270,6 +2326,7 @@ def main() -> None:
                 run_name=args.run,
                 agent_keys=args.agents,
                 task_names=tasks,
+                blocked_gt_by_task=blocked_gt_by_task,
                 host=args.dashboard_host,
                 port=args.dashboard_port,
             )
