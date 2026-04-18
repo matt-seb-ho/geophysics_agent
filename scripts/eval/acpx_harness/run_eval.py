@@ -758,7 +758,6 @@ def build_claude_native_command(
         DOCKER_IMAGE,
         "claude",
         "-p",
-        "--bare",
         "--verbose",
         "--model", model,
         "--tools", NATIVE_CLAUDE_TOOLS,
