@@ -1859,7 +1859,7 @@ def dashboard_html() -> bytes:
       gap: 6px;
       align-items: center;
       flex-wrap: wrap;
-      max-width: 260px;
+      max-width: 520px;
     }
     .tool {
       background: var(--paper-2);
@@ -2123,13 +2123,15 @@ def dashboard_html() -> bytes:
       if (n >= 60) return `${Math.floor(n / 60)}m ${Math.round(n % 60)}s`;
       return `${n.toFixed(1)}s`;
     }
-    function topTools(task, limit = 3) {
+    function taskToolCount(task) {
+      return Number(task.total_tool_calls || 0) + Number(task.pseudo_tool_calls || 0);
+    }
+    function allTools(task) {
       const actual = Object.entries(task.per_tool_counts || {});
       const pseudo = Object.entries(task.pseudo_tool_counts || {})
         .map(([name, count]) => [`pseudo:${name}`, count]);
       return actual.concat(pseudo)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, limit)
+        .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
         .map(([name, count]) => `<span class="tool">${esc(name)}<b>${esc(count)}</b></span>`)
         .join("");
     }
@@ -2170,7 +2172,7 @@ def dashboard_html() -> bytes:
         else m.failed += 1;
         if (task.rag_requirement_met) m.ragMet += 1;
         if (task.primer_read) m.primerRead += 1;
-        m.tools += Number(task.total_tool_calls || 0) + Number(task.pseudo_tool_calls || 0);
+        m.tools += taskToolCount(task);
         m.nav += ragCount(task, "search_navigator");
         m.sch += ragCount(task, "search_schema");
         m.tech += ragCount(task, "search_technical");
@@ -2238,8 +2240,7 @@ def dashboard_html() -> bytes:
         if (sortMode === "primer") return Number(Boolean(b.primer_read)) - Number(Boolean(a.primer_read));
         if (sortMode === "rag") return Number(b.rag_tool_calls || 0) - Number(a.rag_tool_calls || 0);
         if (sortMode === "tools") {
-          return (Number(b.total_tool_calls || 0) + Number(b.pseudo_tool_calls || 0)) -
-            (Number(a.total_tool_calls || 0) + Number(a.pseudo_tool_calls || 0));
+          return taskToolCount(b) - taskToolCount(a);
         }
         return Number(b.elapsed_seconds || 0) - Number(a.elapsed_seconds || 0);
       });
@@ -2275,7 +2276,10 @@ def dashboard_html() -> bytes:
           <td>${ragCell(ragCount(task, "search_navigator"))}</td>
           <td>${ragCell(ragCount(task, "search_schema"))}</td>
           <td>${ragCell(ragCount(task, "search_technical"))}</td>
-          <td><div class="tools">${topTools(task) || `<span class="muted">--</span>`}</div></td>
+          <td>
+            <div class="muted">${esc(taskToolCount(task))} calls</div>
+            <div class="tools">${allTools(task) || `<span class="muted">--</span>`}</div>
+          </td>
           <td><div class="${latestClass}">${esc(latest || "--")}</div></td>
           <td><button class="log-btn" data-agent="${esc(task.agent)}" data-task="${esc(task.task)}">Open Log</button></td>
         </tr>`;
